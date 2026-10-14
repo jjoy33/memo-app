@@ -65,6 +65,11 @@
     <button type="button" class="btn" id="logoutBtn">로그아웃</button>
   </div>
 
+  <nav class="views" role="tablist" aria-label="화면 선택">
+    <button type="button" class="view-tab on" id="tabMemo" role="tab" aria-selected="true">메모</button>
+    <button type="button" class="view-tab" id="tabIdeas" role="tab" aria-selected="false">소재함 <span class="view-n" id="ideaCount"></span></button>
+  </nav>
+
   <form class="composer" id="composer" autocomplete="off">
     <input type="text" id="cTitle" placeholder="제목 (선택)" hidden maxlength="120">
     <div id="cBody" class="rich editor is-empty" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메모 내용" data-ph="적거나, 이미지·파일을 붙여넣으세요"></div>
@@ -92,6 +97,7 @@
   </label>
 
   <div class="tag-bar" id="tagBar" hidden></div>
+  <div class="tag-bar idea-bar" id="ideaBar" hidden></div>
   <datalist id="tagList"></datalist>
   <div class="notice" id="notice" hidden></div>
   <main id="list" aria-live="polite">
@@ -112,6 +118,28 @@
 <dialog id="viewer" class="viewer">
   <button type="button" class="viewer-close" id="viewerClose" aria-label="닫기">✕</button>
   <img id="viewerImg" alt="">
+</dialog>
+
+<button type="button" class="idea-fab" id="ideaFab" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>소재로 보관</button>
+
+<dialog id="ideaDlg" class="idea-dlg" aria-labelledby="ideaDlgTitle">
+  <h2 id="ideaDlgTitle">소재로 보관</h2>
+  <label id="ideaTextWrap" class="dlg-field"><span>소재</span>
+    <textarea id="ideaText" rows="3" maxlength="2000"></textarea></label>
+  <div class="dlg-field"><span>보관할 함</span>
+    <div class="idea-pick" id="ideaBoxPick"></div>
+    <div class="new-box" id="newBoxRow" hidden>
+      <input id="newBoxInput" type="text" maxlength="20" placeholder="새 함 이름 (예: 유튜브 소재)">
+      <button type="button" class="btn" id="newBoxAdd">추가</button>
+    </div>
+  </div>
+  <label id="ideaNoteWrap" class="dlg-field"><span>한 줄 메모 <small>(선택)</small></span>
+    <input id="ideaNote" type="text" maxlength="200" placeholder="떠오른 생각, 쓸 곳 등"></label>
+  <div class="dlg-row">
+    <button type="button" class="btn" id="ideaCancel">취소</button>
+    <button type="button" class="btn primary" id="ideaSave">보관</button>
+  </div>
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>

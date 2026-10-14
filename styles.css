@@ -261,3 +261,57 @@ dialog h2{margin:0 0 8px;font-size:17px}
 #refreshBtn svg{transition:transform .4s}
 #refreshBtn.spin svg{transform:rotate(360deg)}
 @media (prefers-reduced-motion: reduce){#refreshBtn svg{transition:none}}
+
+/* 메모 / 소재함 전환 */
+.views{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:4px}
+.view-tab{flex:1;border:0;background:transparent;border-radius:9px;padding:8px 10px;font-size:15px;font-weight:700;color:var(--muted)}
+.view-tab.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 3px rgba(10,20,30,.12)}
+.view-n{display:inline-block;min-width:20px;padding:1px 6px;margin-left:4px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-family:var(--mono)}
+.view-n:empty{display:none}
+.tag-bar.off-view{display:none!important}
+.idea-bar .add{border-style:dashed;color:var(--muted)}
+.idea-bar .add.strong{border-style:solid;border-color:var(--accent);color:var(--accent)}
+
+/* 소재 카드 */
+.idea-sum{margin:0 2px 8px;font-size:13px;color:var(--muted)}
+.idea-sum b{color:var(--fg)}
+.idea{display:flex;gap:12px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:var(--radius);padding:14px;margin-bottom:10px;transition:opacity .2s,filter .2s}
+.idea.off{opacity:.5;border-left-color:var(--line);filter:grayscale(1)}
+.idea.off .idea-text{text-decoration:none;color:var(--muted)}
+.idea.unsynced{border-style:dashed;border-left-style:solid}
+.idea-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.idea-text{margin:0;font-size:16px;line-height:1.6;font-weight:600;overflow-wrap:anywhere}
+.idea-note{margin:0;font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.idea-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.idea-box{font-family:var(--sans);font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 9px}
+.idea.off .idea-box{color:var(--muted);background:var(--surface-2)}
+.idea-src{border:0;background:none;padding:0;color:var(--fg);font:inherit;font-family:var(--sans);font-weight:600;display:inline-flex;gap:3px;align-items:center;text-decoration:underline;text-underline-offset:2px}
+.idea-src svg{width:13px;height:13px}
+.idea-gone{font-family:var(--sans)}
+.idea-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none}
+.idea-btns{display:flex;gap:2px}
+.idea-btns button{border:0;background:transparent;width:32px;height:32px;border-radius:8px;color:var(--muted);display:grid;place-items:center;padding:0}
+.idea-btns button:hover{background:var(--surface-2);color:var(--fg)}
+.idea-btns svg{width:17px;height:17px}
+.switch{position:relative;width:46px;height:28px;border-radius:999px;border:0;padding:0;background:var(--line);transition:background .2s;flex:none}
+.switch span{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s}
+.switch[aria-checked="true"]{background:var(--ok)}
+.switch[aria-checked="true"] span{transform:translateX(18px)}
+.memo.flash{box-shadow:0 0 0 3px var(--accent);transition:box-shadow .3s}
+
+/* 문장 선택 시 뜨는 버튼 */
+.idea-fab{position:fixed;z-index:40;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:999px;padding:8px 14px;background:var(--fg);color:var(--bg);font-size:14px;font-weight:700;box-shadow:0 8px 24px -8px rgba(0,0,0,.45)}
+.idea-fab svg{width:16px;height:16px}
+
+/* 보관 창 */
+.idea-dlg{display:none;flex-direction:column;gap:14px}
+.idea-dlg[open]{display:flex}
+.dlg-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);font-weight:600}
+.dlg-field small{font-weight:400}
+.dlg-field textarea,.dlg-field input,.new-box input{width:100%;border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:10px 12px;font-size:16px;color:var(--fg);outline:none;font-weight:400;resize:vertical}
+.dlg-field textarea:focus,.dlg-field input:focus,.new-box input:focus{border-color:var(--accent)}
+.idea-pick{display:flex;flex-wrap:wrap;gap:6px}
+.idea-pick .chip{font-size:14px;padding:6px 12px}
+.idea-pick .chip.add{border-style:dashed}
+.new-box{display:flex;gap:6px;margin-top:6px}
+@media (prefers-reduced-motion: reduce){.idea,.switch,.switch span{transition:none}}
