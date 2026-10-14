@@ -60,3 +60,6 @@ alter table public.memos add column if not exists history jsonb not null default
 
 -- 7) 서식 있는 본문 (v3에서 추가)
 alter table public.memos add column if not exists html text not null default '';
+
+-- 8) 태그 (v4에서 추가)
+alter table public.memos add column if not exists tags jsonb not null default '[]'::jsonb;

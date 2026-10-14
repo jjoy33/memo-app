@@ -564,6 +564,66 @@ document.addEventListener("drop", (e) => {
   insertFiles(files, ed);
 });
 
+/* ---------------- 태그 ---------------- */
+const normTag = (t) => String(t || "").replace(/^#+/, "").replace(/[\s,#]+/g, "").slice(0, 30);
+let cTags = [];   // 새 메모에 붙일 태그
+function allTags() {
+  const c = new Map();
+  memos.forEach((m) => (m.tags || []).forEach((t) => c.set(t, (c.get(t) || 0) + 1)));
+  return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"));
+}
+const tagChipsHTML = (tags) => tags.map((t) => `<span class="tag-chip">#${esc(t)}<button type="button" class="tag-x" data-tagrm="${esc(t)}" aria-label="${esc(t)} 태그 빼기">✕</button></span>`).join("");
+const tagEditorHTML = (tags) => `<div class="tag-row tag-edit"><span class="tag-chips">${tagChipsHTML(tags)}</span><input class="tag-input" type="text" placeholder="# 태그 추가" list="tagList" maxlength="30" enterkeyhint="done" aria-label="태그 추가"></div>`;
+function tagsOf(row) {   // row: 태그 입력 줄
+  if (row.id === "cTagRow") return cTags;
+  const m = memos.find((x) => x.id === (row.closest(".memo") || {}).dataset?.id); return m ? (m.tags || []) : [];
+}
+function setTags(row, tags) {
+  row.querySelector(".tag-chips").innerHTML = tagChipsHTML(tags);
+  if (row.id === "cTagRow") { cTags = tags; row.classList.toggle("has-tags", tags.length > 0); lsSet("memo-draft-tags", tags); return; }
+  const m = memos.find((x) => x.id === row.closest(".memo").dataset.id); if (!m) return;
+  m.tags = tags;
+  if (inlineId === m.id) { inlineDirty = true; clearTimeout(inlineTimer); inlineTimer = setTimeout(inlineSaveNow, 1000); }
+}
+function addTagFrom(input) {
+  const row = input.closest(".tag-row"), parts = input.value.split(/[\s,]+/).map(normTag).filter(Boolean);
+  input.value = "";
+  if (!parts.length) return;
+  const tags = tagsOf(row).slice();
+  parts.forEach((t) => { if (!tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.push(t); });
+  setTags(row, tags);
+}
+document.addEventListener("keydown", (e) => {
+  const inp = e.target.closest && e.target.closest(".tag-input"); if (!inp) return;
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === "Enter" || e.key === "," || e.key === " ") { e.preventDefault(); addTagFrom(inp); }
+  else if (e.key === "Backspace" && !inp.value) { const row = inp.closest(".tag-row"), t = tagsOf(row).slice(); if (t.length) { t.pop(); setTags(row, t); } }
+});
+document.addEventListener("input", (e) => {   // 목록에서 고른 경우 바로 추가
+  const inp = e.target.closest && e.target.closest(".tag-input"); if (!inp) return;
+  if (e.inputType === "insertReplacementText" || (!e.inputType && inp.value)) addTagFrom(inp);
+});
+document.addEventListener("focusout", (e) => {
+  const inp = e.target.closest && e.target.closest(".tag-input"); if (inp && inp.value.trim()) addTagFrom(inp);
+});
+document.addEventListener("click", (e) => {
+  const x = e.target.closest && e.target.closest(".tag-x"); if (!x) return;
+  const row = x.closest(".tag-row"); setTags(row, tagsOf(row).filter((t) => t !== x.dataset.tagrm));
+});
+function setTagFilter(t) {
+  const cur = query.startsWith("#") ? query.slice(1).toLowerCase() : "";
+  query = cur === String(t).toLowerCase() ? "" : "#" + t;
+  $("#q").value = query; render();
+  if (query) window.scrollTo({ top: $("#q").getBoundingClientRect().top + scrollY - 80, behavior: "smooth" });
+}
+function renderTagBar() {
+  const tags = allTags(), bar = $("#tagBar"), active = query.startsWith("#") ? query.slice(1).toLowerCase() : "";
+  bar.hidden = !tags.length;
+  bar.innerHTML = tags.map(([t, n]) => `<button type="button" class="tag-filter${active === t.toLowerCase() ? " on" : ""}" data-tag="${esc(t)}" aria-pressed="${active === t.toLowerCase()}">#${esc(t)}<span>${n}</span></button>`).join("");
+  $("#tagList").innerHTML = tags.map(([t]) => `<option value="${esc(t)}">`).join("");
+}
+$("#tagBar").addEventListener("click", (e) => { const b = e.target.closest("[data-tag]"); if (b) setTagFilter(b.dataset.tag); });
+
 /* ---------------- 입력창 ---------------- */
 const cBody = $("#cBody"), cTitle = $("#cTitle"), form = $("#composer");
 $("#cTools").innerHTML = toolsHTML();
@@ -576,6 +636,7 @@ function syncSave() { $("#cSave").disabled = saving || (isEmptyEditor(cBody) && 
 function syncEmpty() { cBody.classList.toggle("is-empty", isEmptyEditor(cBody)); }
 function syncHint() { $("#cHint").textContent = !fine ? "" : expanded ? "Ctrl+Enter 저장" : "Enter 저장 · Shift+Enter 줄바꿈"; }
 syncHint();
+cTags = lsGet("memo-draft-tags", []); setTags($("#cTagRow"), cTags);
 { const d = lsGet("memo-draft-html", ""); if (d) { cBody.innerHTML = clean(d); fillMedia(cBody); } syncEmpty(); syncSave(); }
 let draftTimer;
 cBody.addEventListener("input", () => {
@@ -632,6 +693,7 @@ form.addEventListener("submit", async (e) => {
     await Promise.allSettled([...inflight]);
     saving = false; $("#cSave").textContent = "저장";
   }
+  if ($("#cTagInput").value.trim()) addTagFrom($("#cTagInput"));
   const html = storeHTML(cBody), body = textOf(cBody), title = expanded ? cTitle.value.trim() : "";
   if (!html && !title && !pending.length) return;
   if (pending.length && !navigator.onLine) { toast("파일 첨부는 인터넷 연결이 필요합니다."); return; }
@@ -655,11 +717,11 @@ form.addEventListener("submit", async (e) => {
   const attachments = composerAtts.filter((a) => used.has(a.path)).concat(files);
   const unused = composerAtts.filter((a) => !used.has(a.path)).map((a) => a.path);
   if (unused.length && navigator.onLine) sb.storage.from(BUCKET).remove(unused);
-  const row = { id, user_id: uid, title, body, html, todo: cTodo, done: false, pinned: cPin, attachments, history: [], created_at: now, updated_at: now };
+  const row = { id, user_id: uid, title, body, html, todo: cTodo, done: false, pinned: cPin, attachments, tags: cTags.slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
   pending.forEach((p) => p.url && URL.revokeObjectURL(p.url)); pending = []; renderPending();
-  cBody.innerHTML = ""; cTitle.value = ""; composerAtts = [];
+  cBody.innerHTML = ""; cTitle.value = ""; composerAtts = []; setTags($("#cTagRow"), []);
   lsSet("memo-draft-html", ""); lsSet("memo-draft-id", ""); lsSet("memo-draft-atts", []);
   syncEmpty(); syncSave();
   render(); toast("저장했습니다 · " + timeStr(Date.now()));
@@ -742,9 +804,11 @@ function memoHTML(m) {
   const text = inline
     ? `<input class="in-title" type="text" maxlength="120" placeholder="제목 (선택)" value="${esc(m.title || "")}">
        ${toolsHTML()}
-       <div class="m-body rich editor in-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메모 내용" data-ph="내용">${editHTML(m)}</div>`
+       <div class="m-body rich editor in-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메모 내용" data-ph="내용">${editHTML(m)}</div>
+       ${tagEditorHTML(m.tags || [])}`
     : `${m.title ? `<h3 class="m-title editable">${hl(m.title)}</h3>` : ""}
-       <div class="m-body rich editable" data-ph="${m.title || (m.attachments || []).length ? "눌러서 내용 추가" : ""}">${viewHTML(m)}</div>`;
+       <div class="m-body rich editable" data-ph="${m.title || (m.attachments || []).length ? "눌러서 내용 추가" : ""}">${viewHTML(m)}</div>
+       ${(m.tags || []).length ? `<div class="tags">${m.tags.map((t) => `<button type="button" class="tag-chip view" data-act="tag" data-tag="${esc(t)}" title="#${esc(t)} 메모만 보기">#${hl(t)}</button>`).join("")}</div>` : ""}`;
   return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${m._local ? " unsynced" : ""}${inline ? " inline" : ""}" data-id="${m.id}">
     ${checkbox}
     <div class="m-main">
@@ -764,7 +828,9 @@ function memoHTML(m) {
 }
 function matches(m, q) {
   if (!q) return true;
-  return (m.title || "").toLowerCase().includes(q) || (m.body || "").toLowerCase().includes(q) ||
+  const tags = (m.tags || []).map((t) => t.toLowerCase());
+  if (q.startsWith("#")) { const t = q.slice(1); return !t || tags.some((x) => x.startsWith(t)); }
+  return tags.some((x) => x.includes(q)) || (m.title || "").toLowerCase().includes(q) || (m.body || "").toLowerCase().includes(q) ||
     (m.attachments || []).some((a) => (a.name || "").toLowerCase().includes(q));
 }
 function render() {
@@ -785,14 +851,16 @@ function render() {
     groups.forEach((arr, k) => { html += `<section class="group"><div class="group-h">${dayLabel(k)}<span class="n">${arr.length}</span></div>${arr.map(memoHTML).join("")}</section>`; });
     el.innerHTML = html;
   }
+  renderTagBar();
   ensureUrls(list);
 }
 
 /* ---------------- 이전 버전 기록 ---------------- */
-const snap = (m) => ({ title: m.title || "", body: m.body || "", html: m.html || "", at: m.updated_at });
+const snap = (m) => ({ title: m.title || "", body: m.body || "", html: m.html || "", tags: (m.tags || []).slice(), at: m.updated_at });
+const tagKey = (t) => JSON.stringify(t || []);
 function withHistory(m, before) {
   const h = (m.history || []).slice(), last = h[h.length - 1];
-  if (!last || last.title !== before.title || last.body !== before.body || (last.html || "") !== (before.html || "")) h.push(before);
+  if (!last || last.title !== before.title || last.body !== before.body || (last.html || "") !== (before.html || "") || tagKey(last.tags) !== tagKey(before.tags)) h.push(before);
   return h.slice(-HISTORY_MAX);
 }
 function saveMemo(m, patch) {
@@ -823,20 +891,21 @@ function inlineSaveNow() {
 }
 function finishInline() {
   if (!inlineId) return;
+  const tin = document.querySelector(".memo.inline .tag-input"); if (tin && tin.value.trim()) addTagFrom(tin);
   const m = memos.find((x) => x.id === inlineId), base = inlineBase, dirty = inlineDirty;
   clearTimeout(inlineTimer); inlineTimer = null;
   inlineId = null; inlineBase = null; inlineDirty = false; pendingRender = false;
   document.querySelectorAll(".pop.open").forEach((p) => p.classList.remove("open"));
   if (!m) { softRender(); return; }
   m.title = (m.title || "").trim();
-  const changedNow = dirty && (m.title !== base.title || (m.body || "") !== base.body || (m.html || "") !== base.html);
+  const changedNow = dirty && (m.title !== base.title || (m.body || "") !== base.body || (m.html || "") !== base.html || tagKey(m.tags) !== tagKey(base.tags));
   if (changedNow) {
     saveMemo(m, { history: withHistory(m, base), updated_at: new Date().toISOString() });
     const id = m.id;
     toast("수정했습니다", "되돌리기", () => {
       const mm = memos.find((x) => x.id === id); if (!mm) return;
       if (inlineId === id) { inlineId = null; inlineBase = null; clearTimeout(inlineTimer); }
-      saveMemo(mm, { title: base.title, body: base.body, html: base.html, history: withHistory(mm, snap(mm)), updated_at: new Date().toISOString() });
+      saveMemo(mm, { title: base.title, body: base.body, html: base.html, tags: base.tags, history: withHistory(mm, snap(mm)), updated_at: new Date().toISOString() });
       render(); toast("수정 전으로 되돌렸습니다");
     });
   } else if (dirty) saveMemo(m, {});
@@ -856,10 +925,19 @@ document.addEventListener("pointerdown", (e) => {
   pointerDown = true;
   if (inlineId && e.target.closest && !e.target.closest(".memo.inline, .toast, dialog")) finishInline();
 }, true);
+const afterPointerQ = [];
+const afterPointer = (fn) => { if (pointerDown) afterPointerQ.push(fn); else setTimeout(fn, 0); };
 document.addEventListener("pointerup", () => {
   pointerDown = false;
   if (renderAfterPointer) { renderAfterPointer = false; setTimeout(requestRender, 0); }
+  while (afterPointerQ.length) setTimeout(afterPointerQ.shift(), 0);
 }, true);
+document.addEventListener("pointercancel", () => { pointerDown = false; while (afterPointerQ.length) setTimeout(afterPointerQ.shift(), 0); }, true);
+// 입력창 도구는 클릭이 끝난 뒤에 접어서, 화면이 밀려 클릭이 빗나가지 않게 합니다
+$("#composer").addEventListener("focusin", () => $("#composer").classList.add("active"));
+$("#composer").addEventListener("focusout", () => afterPointer(() => {
+  if (!$("#composer").contains(document.activeElement)) $("#composer").classList.remove("active");
+}));
 $("#list").addEventListener("focusout", (e) => {
   if (!inlineId || !document.hasFocus()) return;   // 파일 선택 창이 열린 경우는 계속 수정 중
   const art = e.target.closest(".memo.inline"); if (!art) return;
@@ -918,10 +996,11 @@ $("#list").addEventListener("click", async (e) => {
     }, 7000);
     return;
   }
+  if (act === "tag") { setTagFilter(btn.dataset.tag); return; }
   if (act === "hist") { histOpenId = histOpenId === id ? null : id; return render(); }
   if (act === "restore") {
     const h = (m.history || [])[+btn.dataset.i]; if (!h) return;
-    saveMemo(m, { title: h.title || "", body: h.body || "", html: h.html || "", history: withHistory(m, snap(m)), updated_at: new Date().toISOString() });
+    saveMemo(m, { title: h.title || "", body: h.body || "", html: h.html || "", tags: h.tags || m.tags || [], history: withHistory(m, snap(m)), updated_at: new Date().toISOString() });
     histOpenId = null; render(); toast("이전 버전으로 되돌렸습니다. 방금 내용도 이전 버전에 남아 있습니다.");
     return;
   }
@@ -974,7 +1053,8 @@ function exportText() {
     const tags = [m.pinned ? "[고정]" : "", m.todo ? (m.done ? "[완료]" : "[할 일]") : ""].filter(Boolean).join(" ");
     const head = "■ " + fullStamp(c) + (u - c > 60000 ? " (수정 " + fullStamp(u) + ")" : "") + (tags ? " " + tags : "");
     const files = (m.attachments || []).map((a) => "  첨부: " + a.name + " (" + fmtSize(a.size || 0) + ")").join("\n");
-    return [head, m.title ? "제목: " + m.title : "", m.body, files].filter(Boolean).join("\n");
+    const tg = (m.tags || []).length ? "태그: " + m.tags.map((t) => "#" + t).join(" ") : "";
+    return [head, m.title ? "제목: " + m.title : "", m.body, tg, files].filter(Boolean).join("\n");
   }).join("\n\n");
 }
 const dlg = $("#exportDlg");

@@ -77,6 +77,7 @@
       <span class="hint" id="cHint"></span>
       <button type="submit" class="save" id="cSave" disabled>저장</button>
     </div>
+    <div class="tag-row" id="cTagRow"><span class="tag-chips" id="cTagChips"></span><input class="tag-input" id="cTagInput" type="text" placeholder="# 태그 추가" list="tagList" maxlength="30" enterkeyhint="done" aria-label="태그 추가"></div>
     <div id="cTools"></div>
     <input type="file" id="fileInput" multiple hidden>
     <div class="drop-hint" id="dropHint">여기에 놓으면 첨부됩니다</div>
@@ -84,10 +85,12 @@
 
   <label class="search" for="q">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="q" type="search" placeholder="메모·파일 이름 검색">
+    <input id="q" type="search" placeholder="메모·파일 이름 검색 (#태그)">
     <span class="count" id="count"></span>
   </label>
 
+  <div class="tag-bar" id="tagBar" hidden></div>
+  <datalist id="tagList"></datalist>
   <div class="notice" id="notice" hidden></div>
   <main id="list" aria-live="polite">
     <div class="empty"><strong>메모를 불러오는 중입니다</strong></div>
