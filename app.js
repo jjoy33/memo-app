@@ -164,12 +164,27 @@ function applyOutbox(list) {
   }
   return out.sort((a, b) => ms(b.created_at) - ms(a.created_at));
 }
-async function load() {
-  if (!navigator.onLine) return;
-  const { data, error } = await sb.from("memos").select("*").order("created_at", { ascending: false }).limit(3000);
-  if (error) { if (/relation|does not exist/i.test(error.message)) notice("Supabase에 memos 테이블이 없습니다. README의 SQL을 먼저 실행해 주세요."); return; }
-  memos = applyOutbox(data || []);
-  saveCache(); requestRender();
+let loading = null, lastLoad = 0;
+async function load(manual) {
+  if (!navigator.onLine || !uid) { if (manual) toast("인터넷 연결을 확인해 주세요"); return; }
+  if (loading) return loading;
+  loading = (async () => {
+    const before = memos.length;
+    const { data, error } = await sb.from("memos").select("*").order("created_at", { ascending: false }).limit(3000);
+    if (error) {
+      if (/relation|does not exist/i.test(error.message)) notice("Supabase에 memos 테이블이 없습니다. README의 SQL을 먼저 실행해 주세요.");
+      if (manual) toast("불러오지 못했습니다. 잠시 뒤 다시 눌러주세요.");
+      return;
+    }
+    let next = applyOutbox(data || []).filter((m) => !pendingDeletes.has(m.id));
+    // 지금 이 기기에서 고치고 있는 메모는 화면의 내용을 그대로 유지
+    const editingLocal = inlineId && memos.find((m) => m.id === inlineId);
+    if (editingLocal) next = next.map((m) => m.id === inlineId ? editingLocal : m);
+    memos = next; lastLoad = Date.now();
+    saveCache(); requestRender();
+    if (manual) { const diff = memos.length - before; toast(diff > 0 ? `새 메모 ${diff}개를 가져왔습니다` : "최신 상태입니다"); }
+  })();
+  try { await loading; } finally { loading = null; }
 }
 function subscribe() {
   if (channel) sb.removeChannel(channel);
@@ -187,7 +202,13 @@ function subscribe() {
       const id = p.old && p.old.id; if (!id || !memos.some((m) => m.id === id)) return;
       memos = memos.filter((m) => m.id !== id); saveCache(); requestRender();
     })
-    .subscribe();
+    .subscribe((status) => {
+      // 실시간 연결이 끊기면 5초 뒤 다시 연결 (오래 켜 둔 PC 창 대비)
+      if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") && uid) {
+        const ch = channel;
+        setTimeout(() => { if (uid && ch === channel && navigator.onLine) { subscribe(); load(); } }, 5000);
+      }
+    });
 }
 function queue(op) {
   // 같은 메모의 이전 대기 작업은 합칩니다
@@ -228,6 +249,13 @@ async function flush() {
 window.addEventListener("online", () => { syncDot(); flush(); load(); subscribe(); });
 window.addEventListener("offline", syncDot);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && uid) { flush(); load(); } });
+// PC 창으로 돌아오면 바로, 켜 둔 동안에는 30초마다 새 메모 확인
+window.addEventListener("focus", () => { if (uid && Date.now() - lastLoad > 3000) { flush(); load(); } });
+setInterval(() => { if (uid && document.visibilityState === "visible" && Date.now() - lastLoad > 25000) load(); }, 30000);
+$("#refreshBtn").addEventListener("click", () => {
+  const b = $("#refreshBtn"); b.classList.add("spin");
+  flush(); load(true).finally(() => setTimeout(() => b.classList.remove("spin"), 400));
+});
 
 /* ---------------- 첨부 URL ---------------- */
 async function ensureUrls(list) {
