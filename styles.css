@@ -103,6 +103,13 @@ h1 span{color:var(--accent)}
 .m-title{font-weight:700;font-size:16px;margin:0}
 .m-body{overflow-wrap:anywhere;margin:0}
 .m-body a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+/* 아주 긴 메모 접기 */
+.m-body.clipped{max-height:var(--clip,220px);overflow:hidden;cursor:pointer;
+  -webkit-mask-image:linear-gradient(to bottom,#000 55%,transparent);mask-image:linear-gradient(to bottom,#000 55%,transparent)}
+.clip-btn{align-self:flex-start;border:1px solid var(--line);background:var(--surface-2);color:var(--fg);border-radius:999px;
+  font-size:13px;font-weight:600;padding:4px 12px;cursor:pointer}
+.clip-btn:hover{border-color:var(--accent);color:var(--accent)}
+.clip-btn[aria-expanded="true"]{position:sticky;bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.12)}
 .m-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .m-meta .tag{color:var(--accent);font-family:var(--sans);font-weight:700}
 .m-actions{display:flex;gap:2px;flex:none;align-self:flex-start}

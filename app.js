@@ -870,7 +870,38 @@ function render() {
   }
   renderTagBar();
   ensureUrls(list);
+  applyClips();
 }
+
+/* ---------------- 아주 긴 메모 접기 ---------------- */
+// 본문이 LONG_PX보다 길면 윗부분(CLIP_PX)만 보이게 접어 둡니다. 펼친 메모는 이 기기에 기억합니다.
+const LONG_PX = 560, CLIP_PX = 220;
+let openLong = new Set(lsGet("memo-open-long", []));
+function applyClips() {
+  document.querySelectorAll("#list .memo:not(.inline):not(.editing)").forEach((art) => {
+    const b = art.querySelector(".m-body.editable"); if (!b) return;
+    let btn = art.querySelector(".clip-btn");
+    const long = !(query && !query.startsWith("#")) && b.scrollHeight > LONG_PX;   // 글자 검색 중에는 찾은 글자가 가려지지 않게 모두 펼침
+    if (!long) { b.classList.remove("long", "clipped"); if (btn) btn.remove(); return; }
+    const open = openLong.has(art.dataset.id);
+    b.classList.add("long"); b.classList.toggle("clipped", !open);
+    b.style.setProperty("--clip", CLIP_PX + "px");
+    if (!btn) { btn = document.createElement("button"); btn.type = "button"; btn.className = "clip-btn"; btn.dataset.act = "clip"; b.after(btn); }
+    btn.setAttribute("aria-expanded", String(open));
+    btn.textContent = open ? "접기 ▴" : "펼쳐서 전체 보기 ▾";
+  });
+}
+function toggleClip(art) {
+  const id = art.dataset.id, opening = !openLong.has(id);
+  opening ? openLong.add(id) : openLong.delete(id);
+  lsSet("memo-open-long", [...openLong]);
+  applyClips();
+  if (!opening && art.getBoundingClientRect().top < 0) art.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+let clipTimer = null;
+const clipSoon = () => { clearTimeout(clipTimer); clipTimer = setTimeout(applyClips, 120); };
+$("#list").addEventListener("load", (e) => { if (e.target.tagName === "IMG") clipSoon(); }, true);   // 이미지가 늦게 뜨면 길이 다시 재기
+window.addEventListener("resize", clipSoon);
 
 /* ---------------- 이전 버전 기록 ---------------- */
 const snap = (m) => ({ title: m.title || "", body: m.body || "", html: m.html || "", tags: (m.tags || []).slice(), at: m.updated_at });
@@ -988,6 +1019,8 @@ $("#list").addEventListener("click", async (e) => {
     if (img && img.src) { $("#viewerImg").src = img.src; $("#viewer").showModal(); return; }
     // 글자를 누르면 바로 수정 (링크·영상·첨부는 그대로)
     if (e.target.closest("a, video, .atts, .hist, .confirm")) return;
+    const clipped = e.target.closest(".m-body.clipped");   // 접힌 메모는 누르면 먼저 펼침
+    if (clipped) { if (!String(getSelection()).length) toggleClip(clipped.closest("[data-id]")); return; }
     const ed = e.target.closest(".editable"); if (!ed) return;
     if (String(getSelection()).length) return;   // 글자를 드래그해 복사하는 중
     const mm = memos.find((x) => x.id === ed.closest("[data-id]").dataset.id);
@@ -997,6 +1030,7 @@ $("#list").addEventListener("click", async (e) => {
   const art = btn.closest("[data-id]"); if (!art) return;
   const id = art.dataset.id, m = memos.find((x) => x.id === id); if (!m) return;
   const act = btn.dataset.act;
+  if (act === "clip") { toggleClip(art); return; }
   if (act === "view") { const a = m.attachments[+btn.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
   if (act === "done") { saveMemo(m, { done: !m.done }); return render(); }
   if (act === "pin") { saveMemo(m, { pinned: !m.pinned }); return render(); }
