@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>수진쌤 메모</title>
+<meta name="theme-color" content="#eef1f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14181d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="메모">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<script>try{var t=localStorage.getItem("memo-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+
+<!-- 로그인 화면 -->
+<section class="auth" id="authView" hidden>
+  <div class="auth-card">
+    <h1>메모<span>.</span></h1>
+    <p class="auth-sub">폰과 PC에서 같은 메모를 씁니다. 한 번 로그인하면 계속 유지됩니다.</p>
+    <form id="authForm" autocomplete="on">
+      <label for="aEmail">이메일</label>
+      <input id="aEmail" type="email" autocomplete="username" required>
+      <label for="aPw">비밀번호 (6자 이상)</label>
+      <input id="aPw" type="password" autocomplete="current-password" minlength="6" required>
+      <button type="submit" class="save wide" id="aSubmit">로그인</button>
+      <p class="auth-msg" id="authMsg" role="status"></p>
+    </form>
+    <button type="button" class="linklike" id="authToggle">처음이신가요? 계정 만들기</button>
+  </div>
+</section>
+
+<!-- 설정 필요 화면 -->
+<section class="auth" id="setupView" hidden>
+  <div class="auth-card">
+    <h1>설정이 필요합니다</h1>
+    <p class="auth-sub"><code>config.js</code> 파일에 Supabase 주소와 공개 키를 넣어주세요. 방법은 README.md에 있습니다.</p>
+  </div>
+</section>
+
+<!-- 메모 화면 -->
+<div class="wrap" id="appView" hidden>
+  <header>
+    <h1>메모<span>.</span></h1>
+    <div class="hdr-actions">
+      <span class="sync" id="sync" title="동기화 상태"></span>
+      <button class="icon-btn" id="exportBtn" type="button" title="텍스트로 내보내기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span class="lbl">내보내기</span></button>
+      <button class="icon-btn" id="themeBtn" type="button" title="화면 모드 바꾸기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><span class="lbl" id="themeLbl">다크</span></button>
+      <button class="icon-btn" id="menuBtn" type="button" title="계정" aria-haspopup="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></button>
+    </div>
+  </header>
+  <div class="account" id="accountBox" hidden>
+    <span id="accEmail"></span>
+    <span class="acc-usage" id="accUsage"></span>
+    <button type="button" class="btn" id="logoutBtn">로그아웃</button>
+  </div>
+
+  <form class="composer" id="composer" autocomplete="off">
+    <input type="text" id="cTitle" placeholder="제목 (선택)" hidden maxlength="120">
+    <textarea id="cBody" rows="1" placeholder="적거나, 이미지·파일을 붙여넣으세요"></textarea>
+    <div class="pending" id="cPending" hidden></div>
+    <div class="comp-row">
+      <button type="button" class="chip icon-chip" id="cAttach" title="파일 첨부" aria-label="파일 첨부">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3l7.5-7.5"/></svg></button>
+      <button type="button" class="chip" id="cExpand" aria-pressed="false">제목·긴 글</button>
+      <button type="button" class="chip" id="cTodo" aria-pressed="false">할 일</button>
+      <button type="button" class="chip" id="cPin" aria-pressed="false">고정</button>
+      <span class="spacer"></span>
+      <span class="hint" id="cHint"></span>
+      <button type="submit" class="save" id="cSave" disabled>저장</button>
+    </div>
+    <input type="file" id="fileInput" multiple hidden>
+    <div class="drop-hint" id="dropHint">여기에 놓으면 첨부됩니다</div>
+  </form>
+
+  <label class="search" for="q">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="메모·파일 이름 검색">
+    <span class="count" id="count"></span>
+  </label>
+
+  <div class="notice" id="notice" hidden></div>
+  <main id="list" aria-live="polite">
+    <div class="empty"><strong>메모를 불러오는 중입니다</strong></div>
+  </main>
+</div>
+
+<dialog id="exportDlg">
+  <h2>텍스트로 내보내기</h2>
+  <textarea id="exportText" readonly></textarea>
+  <div class="dlg-row">
+    <button type="button" class="btn" id="dlgClose">닫기</button>
+    <button type="button" class="btn" id="dlgSave">.txt 저장</button>
+    <button type="button" class="btn primary" id="dlgCopy">전체 복사</button>
+  </div>
+</dialog>
+
+<dialog id="viewer" class="viewer">
+  <button type="button" class="viewer-close" id="viewerClose" aria-label="닫기">✕</button>
+  <img id="viewerImg" alt="">
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="config.js"></script>
+<script src="lib/supabase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
