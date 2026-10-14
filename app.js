@@ -569,7 +569,7 @@ const normTag = (t) => String(t || "").replace(/^#+/, "").replace(/[\s,#]+/g, ""
 let cTags = [];   // 새 메모에 붙일 태그
 function allTags() {
   const c = new Map();
-  memos.forEach((m) => (m.tags || []).forEach((t) => c.set(t, (c.get(t) || 0) + 1)));
+  memos.forEach((m) => memoTags(m).forEach((t) => c.set(t, (c.get(t) || 0) + 1)));
   return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"));
 }
 const tagChipsHTML = (tags) => tags.map((t) => `<span class="tag-chip">#${esc(t)}<button type="button" class="tag-x" data-tagrm="${esc(t)}" aria-label="${esc(t)} 태그 빼기">✕</button></span>`).join("");
@@ -738,10 +738,27 @@ function hl(raw) {
   const re = new RegExp("(" + query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi");
   return raw.split(re).map((p, i) => i % 2 ? "<mark>" + esc(p) + "</mark>" : esc(p)).join("");
 }
+// 글 속 #태그: 앞이 영문·숫자·/·& 가 아닌 # 뒤의 낱말 (예: "#강의", "기획#프롬프트")
+const HASH_RE = /(^|[^A-Za-z0-9/&#])#([0-9A-Za-z가-힣ㄱ-ㆎ_-]*[A-Za-z가-힣ㄱ-ㆎ][0-9A-Za-z가-힣ㄱ-ㆎ_-]*)/g;
+function tagText(raw) {
+  raw = String(raw ?? ""); let out = "", last = 0;
+  raw.replace(HASH_RE, (m, pre, tag, idx) => {
+    out += hl(raw.slice(last, idx) + pre);
+    out += `<button type="button" class="tag-inline" data-act="tag" data-tag="${esc(tag.slice(0, 30))}" title="#${esc(tag)} 메모만 보기">#${hl(tag)}</button>`;
+    last = idx + m.length; return m;
+  });
+  return out + hl(raw.slice(last));
+}
+function bodyTags(text) { const set = new Set(); String(text || "").replace(HASH_RE, (m, p, t) => { set.add(t.slice(0, 30)); return m; }); return [...set]; }
+function memoTags(m) {
+  const out = [...(m.tags || [])];
+  bodyTags((m.title || "") + "\n" + (m.body || "")).forEach((t) => { if (!out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t); });
+  return out;
+}
 function richText(raw) {
   const re = /(https?:\/\/[^\s<>"'\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]+)/g, parts = String(raw ?? "").split(re);
   return parts.map((p, i) => {
-    if (i % 2 === 0) return hl(p);
+    if (i % 2 === 0) return tagText(p);
     let url = p, tail = "";
     while (/[.,)\]!?;:]$/.test(url)) { tail = url.slice(-1) + tail; url = url.slice(0, -1); }
     return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${hl(url)}</a>` + hl(tail);
@@ -806,7 +823,7 @@ function memoHTML(m) {
        ${toolsHTML()}
        <div class="m-body rich editor in-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메모 내용" data-ph="내용">${editHTML(m)}</div>
        ${tagEditorHTML(m.tags || [])}`
-    : `${m.title ? `<h3 class="m-title editable">${hl(m.title)}</h3>` : ""}
+    : `${m.title ? `<h3 class="m-title editable">${tagText(m.title)}</h3>` : ""}
        <div class="m-body rich editable" data-ph="${m.title || (m.attachments || []).length ? "눌러서 내용 추가" : ""}">${viewHTML(m)}</div>
        ${(m.tags || []).length ? `<div class="tags">${m.tags.map((t) => `<button type="button" class="tag-chip view" data-act="tag" data-tag="${esc(t)}" title="#${esc(t)} 메모만 보기">#${hl(t)}</button>`).join("")}</div>` : ""}`;
   return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${m._local ? " unsynced" : ""}${inline ? " inline" : ""}" data-id="${m.id}">
@@ -828,7 +845,7 @@ function memoHTML(m) {
 }
 function matches(m, q) {
   if (!q) return true;
-  const tags = (m.tags || []).map((t) => t.toLowerCase());
+  const tags = memoTags(m).map((t) => t.toLowerCase());
   if (q.startsWith("#")) { const t = q.slice(1); return !t || tags.some((x) => x.startsWith(t)); }
   return tags.some((x) => x.includes(q)) || (m.title || "").toLowerCase().includes(q) || (m.body || "").toLowerCase().includes(q) ||
     (m.attachments || []).some((a) => (a.name || "").toLowerCase().includes(q));

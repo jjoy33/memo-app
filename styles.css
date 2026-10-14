@@ -248,3 +248,5 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .tag-filter span{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400}
 .tag-filter.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .tag-filter.on span{color:var(--accent-ink)}
+.tag-inline{border:0;background:none;padding:0;margin:0;font:inherit;font-weight:700;color:var(--accent);cursor:pointer;border-radius:3px}
+.tag-inline:hover{text-decoration:underline;text-underline-offset:2px}
