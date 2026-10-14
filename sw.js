@@ -1,6 +1,6 @@
 // 오프라인에서도 앱이 열리도록 화면 파일을 보관합니다.
 // 인터넷이 되면 항상 최신 파일을 받아오고, 안 되면 보관본을 씁니다.
-const CACHE = "memo-shell-v11";
+const CACHE = "memo-shell-v12";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "config.js",
   "lib/supabase.js", "lib/591.supabase.js", "lib/purify.min.js", "manifest.webmanifest",

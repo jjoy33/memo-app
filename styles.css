@@ -321,3 +321,11 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .move-row span{display:flex;flex-direction:column;gap:2px}
 .move-row small{color:var(--muted);font-size:12px}
 @media (max-width:480px){.m-actions{display:grid;grid-template-columns:repeat(2,32px);gap:0}}
+
+/* 맨 위로 */
+.to-top{position:fixed;z-index:35;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(24px + env(safe-area-inset-bottom,0px));
+  width:48px;height:48px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--fg);display:grid;place-items:center;
+  box-shadow:0 8px 24px -10px rgba(10,20,30,.45);padding:0}
+.to-top:hover{border-color:var(--accent);color:var(--accent)}
+.to-top svg{width:22px;height:22px}
+@media (min-width:760px){.to-top{right:28px;bottom:28px}}

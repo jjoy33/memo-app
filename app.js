@@ -1396,6 +1396,18 @@ $("#ideaSave").addEventListener("click", () => {
   toast(`'${st.box}'에 보관했습니다`, view === "memo" ? "소재함 보기" : null, () => { ideaBox = st.box; setView("ideas"); });
 });
 
+/* ---------------- 맨 위로 버튼 ---------------- */
+{
+  const btn = $("#toTop");
+  const sync = () => { btn.hidden = window.scrollY < 500; };
+  window.addEventListener("scroll", sync, { passive: true });
+  btn.addEventListener("click", () => {
+    const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+  });
+  sync();
+}
+
 /* ---------------- 검색 ---------------- */
 $("#q").addEventListener("input", (e) => { query = e.target.value.trim(); render(); });
 
