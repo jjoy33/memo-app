@@ -702,6 +702,18 @@ cTitle.addEventListener("input", syncSave);
 $("#cExpand").onclick = function () { expanded = !expanded; this.setAttribute("aria-pressed", expanded); form.classList.toggle("expanded", expanded); cTitle.hidden = !expanded; syncHint(); (expanded ? cTitle : cBody).focus(); };
 $("#cTodo").onclick = function () { cTodo = !cTodo; this.setAttribute("aria-pressed", cTodo); };
 $("#cPin").onclick = function () { cPin = !cPin; this.setAttribute("aria-pressed", cPin); };
+// 소재: 켜고 저장하면 메모 대신 소재함에 바로 보관
+let cIdea = false, cIdeaBox = lsGet("memo-last-box", "블로그 소재");
+function renderCIdea() {
+  $("#cIdea").setAttribute("aria-pressed", cIdea);
+  $("#cIdeaRow").hidden = !cIdea;
+  $("#cSave").textContent = cIdea ? "보관" : "저장";
+  if (!cIdea) return;
+  const boxes = allBoxes(); if (!boxes.includes(cIdeaBox)) cIdeaBox = boxes[0];
+  $("#cIdeaBoxes").innerHTML = boxes.map((b) => `<button type="button" class="chip" aria-pressed="${b === cIdeaBox}" data-cbox="${esc(b)}">${esc(b)}</button>`).join("");
+}
+$("#cIdea").onclick = () => { cIdea = !cIdea; renderCIdea(); };
+$("#cIdeaBoxes").addEventListener("click", (e) => { const b = e.target.closest("[data-cbox]"); if (!b) return; cIdeaBox = b.dataset.cbox; renderCIdea(); });
 cBody.addEventListener("keydown", (e) => {
   if (e.isComposing || e.keyCode === 229 || e.key !== "Enter") return;   // 한글 조합 중 Enter 무시
   const sel = getSelection(), at = sel.rangeCount && elOf(sel.anchorNode);
@@ -746,7 +758,7 @@ form.addEventListener("submit", async (e) => {
   if (inflight.size) {
     saving = true; syncSave(); $("#cSave").textContent = "올리는 중";
     await Promise.allSettled([...inflight]);
-    saving = false; $("#cSave").textContent = "저장";
+    saving = false; renderCIdea();
   }
   if ($("#cTagInput").value.trim()) addTagFrom($("#cTagInput"));
   const html = storeHTML(cBody), body = textOf(cBody), title = expanded ? cTitle.value.trim() : "";
@@ -764,22 +776,43 @@ form.addEventListener("submit", async (e) => {
     } catch (err) {
       toast("올리지 못했습니다: " + err.message);
       if (files.length) sb.storage.from(BUCKET).remove(files.map((a) => a.path));
-      saving = false; $("#cSave").textContent = "저장"; syncSave(); return;
+      saving = false; renderCIdea(); syncSave(); return;
     }
-    saving = false; $("#cSave").textContent = "저장";
+    saving = false; renderCIdea();
   }
   const used = new Set([...cBody.querySelectorAll("[data-path]")].map((x) => x.getAttribute("data-path")));
   const attachments = composerAtts.filter((a) => used.has(a.path)).concat(files);
   const unused = composerAtts.filter((a) => !used.has(a.path)).map((a) => a.path);
   if (unused.length && navigator.onLine) sb.storage.from(BUCKET).remove(unused);
+  const resetComposer = () => {
+    pending.forEach((p) => p.url && URL.revokeObjectURL(p.url)); pending = []; renderPending();
+    cBody.innerHTML = ""; cTitle.value = ""; composerAtts = []; setTags($("#cTagRow"), []);
+    lsSet("memo-draft-html", ""); lsSet("memo-draft-id", ""); lsSet("memo-draft-atts", []);
+    syncEmpty(); syncSave(); renderCIdea();
+  };
+  if (cIdea) {
+    const tagLine = cTags.length ? cTags.map((t) => "#" + t).join(" ") : "";
+    const text = [title, body, tagLine].filter(Boolean).join("\n").trim();
+    const hasFiles = attachments.length > 0;
+    if (!text && !hasFiles) { toast("소재로 보관할 글을 적어주세요"); return; }
+    if (text) {
+      const x = { id: newId(), user_id: uid, memo_id: hasFiles ? id : null, box: cIdeaBox, text, note: "", used: false, created_at: now, updated_at: now };
+      ideas.unshift(x); saveIdea(x, {}); lsSet("memo-last-box", cIdeaBox);
+    }
+    if (!hasFiles) {   // 글만 있으면 소재함에만 보관
+      const box = cIdeaBox;
+      resetComposer(); render();
+      toast(`'${box}'에 소재로 보관했습니다`, "소재함 보기", () => { ideaBox = box; setView("ideas"); });
+      if (fine) cBody.focus();
+      return;
+    }
+  }
   const row = { id, user_id: uid, title, body, html, todo: cTodo, done: false, pinned: cPin, attachments, tags: cTags.slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
-  pending.forEach((p) => p.url && URL.revokeObjectURL(p.url)); pending = []; renderPending();
-  cBody.innerHTML = ""; cTitle.value = ""; composerAtts = []; setTags($("#cTagRow"), []);
-  lsSet("memo-draft-html", ""); lsSet("memo-draft-id", ""); lsSet("memo-draft-atts", []);
-  syncEmpty(); syncSave();
-  render(); toast("저장했습니다 · " + timeStr(Date.now()));
+  const wasIdea = cIdea, box = cIdeaBox;
+  resetComposer();
+  render(); toast(wasIdea ? `사진·파일은 메모로, 글은 '${box}'에도 보관했습니다` : "저장했습니다 · " + timeStr(Date.now()));
   if (fine) cBody.focus();
 });
 

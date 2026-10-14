@@ -80,10 +80,12 @@
       <button type="button" class="chip" id="cExpand" aria-pressed="false">제목·긴 글</button>
       <button type="button" class="chip" id="cTodo" aria-pressed="false">할 일</button>
       <button type="button" class="chip" id="cPin" aria-pressed="false">고정</button>
+      <button type="button" class="chip idea-chip" id="cIdea" aria-pressed="false" title="저장하면 메모 대신 소재함에 바로 보관">소재</button>
       <span class="spacer"></span>
       <span class="hint" id="cHint"></span>
       <button type="submit" class="save" id="cSave" disabled>저장</button>
     </div>
+    <div class="c-idea-row" id="cIdeaRow" hidden><span class="c-idea-label">소재함에 바로 보관 →</span><span class="c-idea-boxes" id="cIdeaBoxes"></span></div>
     <div class="tag-row" id="cTagRow"><span class="tag-chips" id="cTagChips"></span><input class="tag-input" id="cTagInput" type="text" placeholder="# 태그 추가" list="tagList" maxlength="30" enterkeyhint="done" aria-label="태그 추가"></div>
     <div id="cTools"></div>
     <input type="file" id="fileInput" multiple hidden>

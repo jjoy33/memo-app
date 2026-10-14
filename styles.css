@@ -347,3 +347,12 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .idea-text.clipped{max-height:var(--clip,130px);overflow:hidden;cursor:pointer;
   -webkit-mask-image:linear-gradient(to bottom,#000 55%,transparent);mask-image:linear-gradient(to bottom,#000 55%,transparent)}
 .idea-clip[aria-expanded="true"]{position:static;box-shadow:none}
+
+/* 입력창 '소재' 바로 보관 */
+.chip.idea-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.c-idea-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;border-radius:10px;background:var(--accent-soft)}
+.c-idea-row[hidden]{display:none}
+.c-idea-label{font-size:13px;font-weight:700;color:var(--fg)}
+.c-idea-boxes{display:contents}
+.c-idea-row .chip{background:var(--surface)}
+.c-idea-row .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--fg);font-weight:700;box-shadow:inset 0 0 0 1px var(--accent)}
