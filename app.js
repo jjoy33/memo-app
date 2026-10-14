@@ -28,6 +28,11 @@ let uid = null, memos = [], outbox = [], flushing = false, channel = null;
 let editingId = null, editDraft = null, confirmId = null, pendingRender = false;
 let query = "", fileTarget = "composer";
 const urlCache = new Map();   // path -> {url, dl, exp}
+// 바로 수정(인라인) 상태
+let inlineId = null, inlineBase = null, inlineTimer = null;
+let pointerDown = false, renderAfterPointer = false;
+const pendingDeletes = new Map();   // id -> {memo, timer}
+const HISTORY_MAX = 20;
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -65,8 +70,21 @@ function dayLabel(key) {
 const fmtSize = (b) => b < 1024 ? b + "B" : b < 1048576 ? (b / 1024).toFixed(0) + "KB" : b < 1073741824 ? (b / 1048576).toFixed(1) + "MB" : (b / 1073741824).toFixed(2) + "GB";
 
 /* ---------------- 알림 ---------------- */
-let tt;
-function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => el.classList.remove("show"), 2200); }
+let tt, toastFn = null;
+function toast(t, action, fn, ms) {
+  const el = $("#toast");
+  el.innerHTML = esc(t) + (action ? ` <button type="button" class="toast-btn">${esc(action)}</button>` : "");
+  el.classList.toggle("has-action", !!action);
+  toastFn = fn || null;
+  el.classList.add("show"); clearTimeout(tt);
+  tt = setTimeout(() => { el.classList.remove("show"); el.classList.remove("has-action"); toastFn = null; }, ms || (action ? 6000 : 2200));
+}
+$("#toast").addEventListener("click", (e) => {
+  if (!e.target.classList.contains("toast-btn") || !toastFn) return;
+  const fn = toastFn; toastFn = null;
+  $("#toast").classList.remove("show", "has-action"); clearTimeout(tt);
+  fn();
+});
 function notice(t) { const n = $("#notice"); n.textContent = t || ""; n.hidden = !t; }
 function syncDot() {
   const el = $("#sync");
@@ -124,6 +142,7 @@ function showAuth() { $("#authView").hidden = false; $("#appView").hidden = true
 function stop() {
   if (channel) { sb.removeChannel(channel); channel = null; }
   uid = null; memos = []; outbox = []; urlCache.clear(); confirmLogout = false;
+  inlineId = null; inlineBase = null; editingId = null; editDraft = null;
   showAuth();
 }
 function start(user) {
@@ -155,6 +174,7 @@ async function load() {
 function subscribe() {
   if (channel) sb.removeChannel(channel);
   const upsertRow = (row) => {
+    if (row.id === inlineId || pendingDeletes.has(row.id)) return;   // 지금 이 기기에서 고치는 중
     if (outbox.some((o) => (o.row && o.row.id === row.id) || o.id === row.id)) return;   // 내가 보낸 변경 대기 중
     memos = memos.filter((m) => m.id !== row.id); memos.push(row);
     memos.sort((a, b) => ms(b.created_at) - ms(a.created_at));
@@ -391,7 +411,15 @@ form.addEventListener("submit", async (e) => {
 });
 
 /* ---------------- 목록 그리기 ---------------- */
-function requestRender() { if (editingId) { pendingRender = true; return; } render(); }
+function requestRender() { if (editingId || inlineId) { pendingRender = true; return; } render(); }
+// 다른 버튼을 누르는 도중에 화면을 다시 그리면 클릭이 사라지므로, 손을 뗀 뒤에 그립니다
+document.addEventListener("pointerdown", () => { pointerDown = true; }, true);
+document.addEventListener("pointerup", () => {
+  pointerDown = false;
+  if (renderAfterPointer) { renderAfterPointer = false; setTimeout(requestRender, 0); }
+}, true);
+function softRender() { if (pointerDown) renderAfterPointer = true; else setTimeout(requestRender, 0); }
+let histOpenId = null;
 function hl(raw) {
   raw = String(raw ?? "");
   if (!query) return esc(raw);
@@ -439,25 +467,37 @@ function memoHTML(m) {
       </div></div></article>`;
   }
   const c = ms(m.created_at), u = ms(m.updated_at), edited = u - c > 60000;
-  return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${m._local ? " unsynced" : ""}" data-id="${m.id}">
+  const hist = m.history || [];
+  const textHTML = m.id === inlineId
+    ? `<input class="in-title" type="text" maxlength="120" placeholder="제목 (선택)" value="${esc(m.title || "")}">
+       <textarea class="in-body" rows="1" placeholder="내용">${esc(m.body || "")}</textarea>`
+    : `${m.title ? `<h3 class="m-title editable">${hl(m.title)}</h3>` : ""}
+       <p class="m-body editable" data-ph="${m.title || (m.attachments || []).length ? "눌러서 내용 추가" : ""}">${richText(m.body || "")}</p>`;
+  return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${m._local ? " unsynced" : ""}${m.id === inlineId ? " inline" : ""}" data-id="${m.id}">
     ${m.todo ? `<button type="button" class="check" role="checkbox" aria-checked="${!!m.done}" aria-label="완료 표시" data-act="done">${m.done ? ICON.check : ""}</button>` : ""}
     <div class="m-main">
-      ${m.title ? `<h3 class="m-title">${hl(m.title)}</h3>` : ""}
-      ${m.body ? `<p class="m-body">${richText(m.body)}</p>` : ""}
+      ${textHTML}
       ${attsHTML(m)}
       <div class="m-meta">
         ${m.pinned ? '<span class="tag">고정</span>' : ""}
         <time datetime="${esc(m.created_at)}" title="${fullStamp(c)}">${dateStr(c)} ${timeStr(c)}</time>
         ${edited ? `<span title="${fullStamp(u)}">· 수정 ${dayKey(u) === dayKey(c) ? "" : dateStr(u) + " "}${timeStr(u)}</span>` : ""}
         ${m._local ? "<span>· 전송 대기</span>" : ""}
+        ${hist.length ? `<button type="button" class="hist-btn" data-act="hist" aria-expanded="${histOpenId === m.id}">이전 버전 ${hist.length}</button>` : ""}
       </div>
+      ${histOpenId === m.id && hist.length ? `<ol class="hist">${hist.slice().reverse().map((h, ri) => {
+        const i = hist.length - 1 - ri, t = ms(h.at);
+        const preview = ((h.title ? h.title + " · " : "") + (h.body || "")).replace(/\s+/g, " ").trim() || "(빈 메모)";
+        return `<li><span class="h-time">${dateStr(t)} ${timeStr(t)}</span><span class="h-text" title="${esc(preview)}">${esc(preview.length > 60 ? "…" + preview.slice(-60) : preview)}</span>
+          <button type="button" class="btn" data-act="restore" data-i="${i}">이 버전으로 되돌리기</button></li>`;
+      }).join("")}</ol>` : ""}
       ${confirmId === m.id ? `<div class="confirm"><span>이 메모${(m.attachments || []).length ? "와 첨부파일" : ""}을 삭제할까요?</span>
         <button type="button" class="btn danger" data-act="del-yes">삭제</button>
         <button type="button" class="btn" data-act="del-no">취소</button></div>` : ""}
     </div>
     <div class="m-actions">
       <button type="button" data-act="pin" class="${m.pinned ? "on" : ""}" aria-label="${m.pinned ? "고정 해제" : "고정"}" title="${m.pinned ? "고정 해제" : "고정"}">${ICON.pin}</button>
-      <button type="button" data-act="edit" aria-label="수정" title="수정">${ICON.edit}</button>
+      <button type="button" data-act="edit" aria-label="첨부·할 일 편집" title="첨부·할 일 편집">${ICON.edit}</button>
       <button type="button" data-act="del" aria-label="삭제" title="삭제">${ICON.del}</button>
     </div></article>`;
 }
@@ -485,15 +525,103 @@ function render(keepFocus) {
     el.innerHTML = html;
   }
   if (editingId && !keepFocus) { const b = $("#eBody"); if (b) { b.focus(); b.setSelectionRange(b.value.length, b.value.length); } }
+  if (inlineId) document.querySelectorAll(".in-body").forEach(fit);
   ensureUrls(list);
 }
+function fit(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+
+/* ---------------- 이전 버전 기록 ---------------- */
+function withHistory(m, before) {
+  // before: 바뀌기 전 {title, body, at}
+  const h = (m.history || []).slice();
+  const last = h[h.length - 1];
+  if (!last || last.title !== before.title || last.body !== before.body) h.push(before);
+  return h.slice(-HISTORY_MAX);
+}
+function saveMemo(m, patch) {
+  Object.assign(m, patch, { _local: true }); saveCache();
+  queue({ op: "upsert", row: stripLocal(m) });
+}
+
+/* ---------------- 바로 수정(인라인) ---------------- */
+function startInline(m, focusTitle) {
+  if (editingId) return;
+  if (inlineId && inlineId !== m.id) finishInline();
+  inlineId = m.id; confirmId = null;
+  inlineBase = { title: m.title || "", body: m.body || "", at: m.updated_at };
+  render();
+  const art = document.querySelector(`.memo[data-id="${m.id}"]`);
+  const el = art && art.querySelector(focusTitle ? ".in-title" : ".in-body");
+  if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
+}
+function inlineSaveNow() {
+  clearTimeout(inlineTimer); inlineTimer = null;
+  const m = memos.find((x) => x.id === inlineId); if (!m) return;
+  saveMemo(m, { updated_at: new Date().toISOString() });
+}
+function finishInline() {
+  if (!inlineId) return;
+  const m = memos.find((x) => x.id === inlineId), base = inlineBase;
+  clearTimeout(inlineTimer); inlineTimer = null;
+  inlineId = null; inlineBase = null; pendingRender = false;
+  if (!m) { softRender(); return; }
+  m.title = (m.title || "").trim(); m.body = (m.body || "").replace(/\s+$/, "");
+  const changed = m.title !== base.title || m.body !== base.body;
+  if (changed) {
+    saveMemo(m, { history: withHistory(m, base), updated_at: new Date().toISOString() });
+    const id = m.id;
+    toast("수정했습니다", "되돌리기", () => {
+      const mm = memos.find((x) => x.id === id); if (!mm) return;
+      if (inlineId === id) { inlineId = null; inlineBase = null; clearTimeout(inlineTimer); }
+      const cur = { title: mm.title || "", body: mm.body || "", at: mm.updated_at };
+      saveMemo(mm, { title: base.title, body: base.body, history: withHistory(mm, cur), updated_at: new Date().toISOString() });
+      render(); toast("수정 전으로 되돌렸습니다");
+    });
+  }
+  softRender();
+}
+$("#list").addEventListener("input", (e) => {
+  if (!inlineId || !e.target.closest(".memo.inline")) return;
+  const m = memos.find((x) => x.id === inlineId); if (!m) return;
+  if (e.target.classList.contains("in-title")) m.title = e.target.value;
+  if (e.target.classList.contains("in-body")) { m.body = e.target.value; fit(e.target); }
+  clearTimeout(inlineTimer); inlineTimer = setTimeout(inlineSaveNow, 1000);   // 1초 쉬면 자동 저장
+});
+$("#list").addEventListener("focusout", (e) => {
+  if (!inlineId) return;
+  const art = e.target.closest(".memo.inline"); if (!art) return;
+  if (e.relatedTarget && art.contains(e.relatedTarget)) return;   // 제목↔내용 이동
+  finishInline();
+});
+$("#list").addEventListener("keydown", (e) => {
+  if (!inlineId || !e.target.closest(".memo.inline")) return;
+  if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); e.target.blur(); }
+});
+window.addEventListener("pagehide", () => { if (inlineId) inlineSaveNow(); flushDeletes(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { if (inlineId) inlineSaveNow(); flushDeletes(); } });
+
+/* ---------------- 삭제 되돌리기 ---------------- */
+function commitDelete(id) {
+  const p = pendingDeletes.get(id); if (!p) return;
+  clearTimeout(p.timer); pendingDeletes.delete(id);
+  queue({ op: "delete", id, paths: (p.memo.attachments || []).map((a) => a.path) });
+}
+function flushDeletes() { [...pendingDeletes.keys()].forEach(commitDelete); }
 
 /* ---------------- 목록 동작 ---------------- */
 $("#list").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-act]");
   const fileLink = e.target.closest('.att-file[aria-disabled="true"]');
   if (fileLink) { e.preventDefault(); toast(navigator.onLine ? "링크를 준비하고 있습니다" : "오프라인에서는 파일을 열 수 없습니다"); return; }
-  if (!btn) return;
+  if (!btn) {
+    // 글자를 누르면 바로 수정 (링크·첨부는 그대로 열림)
+    if (e.target.closest("a, .atts, .hist, .confirm")) return;
+    const ed = e.target.closest(".editable"); if (!ed) return;
+    if (window.getSelection && String(window.getSelection()).length) return;   // 글자를 드래그해 복사하는 중
+    const mm = memos.find((x) => x.id === ed.closest("[data-id]").dataset.id);
+    if (mm && mm.id !== inlineId) startInline(mm, ed.classList.contains("m-title"));
+    return;
+  }
   const art = btn.closest("[data-id]"); if (!art) return;
   const id = art.dataset.id, m = memos.find((x) => x.id === id); if (!m) return;
   const act = btn.dataset.act;
@@ -509,7 +637,22 @@ $("#list").addEventListener("click", async (e) => {
   if (act === "del-no") { confirmId = null; return render(); }
   if (act === "del-yes") {
     confirmId = null; memos = memos.filter((x) => x.id !== id); saveCache(); render();
-    return queue({ op: "delete", id, paths: (m.attachments || []).map((a) => a.path) });
+    pendingDeletes.set(id, { memo: m, timer: setTimeout(() => commitDelete(id), 7000) });
+    toast("삭제했습니다", "되돌리기", () => {
+      const p = pendingDeletes.get(id); if (!p) return;
+      clearTimeout(p.timer); pendingDeletes.delete(id);
+      memos.push(p.memo); memos.sort((a, b) => ms(b.created_at) - ms(a.created_at));
+      saveCache(); render(); toast("메모를 되살렸습니다");
+    }, 7000);
+    return;
+  }
+  if (act === "hist") { histOpenId = histOpenId === id ? null : id; return render(); }
+  if (act === "restore") {
+    const h = (m.history || [])[+btn.dataset.i]; if (!h) return;
+    const cur = { title: m.title || "", body: m.body || "", at: m.updated_at };
+    saveMemo(m, { title: h.title || "", body: h.body || "", history: withHistory(m, cur), updated_at: new Date().toISOString() });
+    histOpenId = null; render(); toast("이전 버전으로 되돌렸습니다. 방금 내용도 이전 버전에 남아 있습니다.");
+    return;
   }
   if (act === "edit") {
     if (editingId) return;
@@ -541,6 +684,7 @@ $("#list").addEventListener("click", async (e) => {
     endEdit();
     if (!changed) return;
     const patch = { title, body, todo: d.todo, done: d.todo ? !!m.done : false, attachments, updated_at: new Date().toISOString() };
+    if (title !== (m.title || "") || body !== (m.body || "")) patch.history = withHistory(m, { title: m.title || "", body: m.body || "", at: m.updated_at });
     const row = { ...stripLocal(m), ...patch };
     Object.assign(m, patch, { _local: true }); saveCache(); render();
     queue({ op: "upsert", row });

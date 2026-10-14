@@ -54,3 +54,6 @@ create policy "memo_files_update_own" on storage.objects for update to authentic
   using (bucket_id = 'memo-files' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "memo_files_delete_own" on storage.objects for delete to authenticated
   using (bucket_id = 'memo-files' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- 6) 이전 버전 보관 (v2에서 추가)
+alter table public.memos add column if not exists history jsonb not null default '[]'::jsonb;
