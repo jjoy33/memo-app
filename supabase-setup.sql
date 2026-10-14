@@ -57,3 +57,6 @@ create policy "memo_files_delete_own" on storage.objects for delete to authentic
 
 -- 6) 이전 버전 보관 (v2에서 추가)
 alter table public.memos add column if not exists history jsonb not null default '[]'::jsonb;
+
+-- 7) 서식 있는 본문 (v3에서 추가)
+alter table public.memos add column if not exists html text not null default '';
