@@ -148,6 +148,15 @@
 
 <button type="button" class="to-top" id="toTop" aria-label="맨 위로" title="맨 위로" hidden>
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+<dialog id="moveDlg" class="move-dlg" aria-labelledby="moveTitle">
+  <h2 id="moveTitle">소재 이동</h2>
+  <p class="move-what" id="moveWhat"></p>
+  <div class="dlg-field"><span>다른 함으로</span><div class="move-list" id="moveBoxes"></div></div>
+  <div class="dlg-field"><span>메모 목록으로</span>
+    <button type="button" class="move-opt to-memo" id="moveToMemo">메모로 되돌리기 <small>소재함에서는 빠지고 새 메모가 됩니다</small></button></div>
+  <div class="dlg-row"><button type="button" class="btn" id="moveCancel">닫기</button></div>
+</dialog>
+
 <div class="toast" id="toast" role="status"></div>
 
 <script src="config.js"></script>

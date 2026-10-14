@@ -1172,6 +1172,7 @@ function allBoxes() {
   return set;
 }
 const IIC = {
+  move: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
   src: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>'
 };
@@ -1238,6 +1239,7 @@ function ideaHTML(x) {
     <div class="idea-actions">
       <button type="button" class="switch" role="switch" aria-checked="${!x.used}" data-ideact="toggle" title="${x.used ? "다 쓴 소재 (누르면 다시 활성)" : "쓸 소재 (다 쓰면 끄기)"}" aria-label="${x.used ? "비활성 소재" : "활성 소재"}"><span></span></button>
       <div class="idea-btns">
+        <button type="button" data-ideact="move" title="이동" aria-label="다른 함이나 메모로 이동">${IIC.move}</button>
         <button type="button" data-ideact="copy" title="복사" aria-label="복사">${IIC.copy}</button>
         <button type="button" data-ideact="edit" title="수정" aria-label="수정">${ICON.edit}</button>
         <button type="button" data-ideact="del" title="삭제" aria-label="삭제">${ICON.del}</button>
@@ -1273,6 +1275,7 @@ $("#list").addEventListener("click", (e) => {
     navigator.clipboard.writeText(x.text).then(() => toast("소재를 복사했습니다"), () => toast("복사하지 못했습니다. 글자를 길게 눌러 복사해 주세요"));
   }
   if (act === "edit") openIdeaDlg({ mode: "edit", idea: x });
+  if (act === "move") openMoveDlg(x);
   if (act === "src") {
     const id = x.memo_id; view = "memo"; query = ""; $("#q").value = ""; render();
     const art = document.querySelector(`.memo[data-id="${id}"]`);
@@ -1286,6 +1289,44 @@ $("#list").addEventListener("click", (e) => {
       clearTimeout(p.timer); ideaDeletes.delete(x.id); ideas.push(x); saveIdeas(); render(); toast("소재를 되살렸습니다");
     }, 7000);
   }
+});
+
+/* 소재 이동: 다른 함으로 / 메모 목록으로 */
+const moveDlg = $("#moveDlg");
+let moveTarget = null;
+function openMoveDlg(x) {
+  moveTarget = x;
+  $("#moveWhat").textContent = x.text.length > 60 ? x.text.slice(0, 60) + "…" : x.text;
+  $("#moveBoxes").innerHTML = allBoxes().map((b) => b === x.box
+    ? `<button type="button" class="move-opt current" disabled>${esc(b)} <small>지금 여기</small></button>`
+    : `<button type="button" class="move-opt" data-to="${esc(b)}">${esc(b)}</button>`).join("");
+  moveDlg.showModal();
+}
+$("#moveCancel").addEventListener("click", () => moveDlg.close());
+$("#moveBoxes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-to]"); if (!b || !moveTarget) return;
+  const x = moveTarget, from = x.box, to = b.dataset.to;
+  saveIdea(x, { box: to, updated_at: new Date().toISOString() });
+  moveDlg.close(); render();
+  toast(`'${to}'(으)로 옮겼습니다`, "되돌리기", () => { saveIdea(x, { box: from, updated_at: new Date().toISOString() }); render(); toast("원래 함으로 되돌렸습니다"); });
+});
+$("#moveToMemo").addEventListener("click", () => {
+  const x = moveTarget; if (!x) return;
+  const now = new Date().toISOString(), id = newId();
+  const body = x.text + (x.note ? "\n\n" + x.note : "");
+  const html = plainToHtml(body);
+  const row = { id, user_id: uid, title: "", body, html, tags: [], todo: false, done: false, pinned: false, attachments: [], history: [], created_at: now, updated_at: now };
+  memos.unshift({ ...row, _local: true }); saveCache();
+  queue({ op: "upsert", row, isNew: true });
+  ideas = ideas.filter((i) => i.id !== x.id); saveIdeas();
+  ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); queue({ op: "delete", table: "clips", id: x.id }); }, 7000) });
+  moveDlg.close(); render();
+  toast("메모 목록으로 옮겼습니다", "되돌리기", () => {
+    const p = ideaDeletes.get(x.id); if (p) { clearTimeout(p.timer); ideaDeletes.delete(x.id); }
+    ideas.push(x); saveIdeas();
+    memos = memos.filter((m) => m.id !== id); saveCache(); queue({ op: "delete", id, paths: [] });
+    render(); toast("옮기기 전으로 되돌렸습니다");
+  }, 7000);
 });
 
 /* 메모에서 문장을 드래그하면 '소재로 보관' 버튼 */

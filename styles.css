@@ -329,3 +329,16 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .to-top:hover{border-color:var(--accent);color:var(--accent)}
 .to-top svg{width:22px;height:22px}
 @media (min-width:760px){.to-top{right:28px;bottom:28px}}
+
+/* 소재 이동 창 */
+.move-dlg{display:none;flex-direction:column;gap:14px}
+.move-dlg[open]{display:flex}
+.move-what{margin:0;padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:6px;font-weight:600;overflow-wrap:anywhere}
+.move-list{display:flex;flex-direction:column;gap:6px}
+.move-opt{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;border:1px solid var(--line);background:var(--surface);
+  border-radius:10px;padding:11px 14px;font-size:15px;font-weight:600;color:var(--fg)}
+.move-opt:hover:not(:disabled){border-color:var(--accent)}
+.move-opt small{font-size:12px;font-weight:400;color:var(--muted)}
+.move-opt.current{opacity:.55}
+.move-opt.to-memo{border-style:dashed}
+.move-opt.to-memo{flex-direction:column;align-items:flex-start;gap:2px}
