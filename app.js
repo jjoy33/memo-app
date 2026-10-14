@@ -12,6 +12,7 @@ const ICON = {
   pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4-1-6z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg>',
   del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>'
 };
 
@@ -893,6 +894,7 @@ function memoHTML(m) {
     </div>
     <div class="m-actions">
       <button type="button" data-act="pin" class="${m.pinned ? "on" : ""}" aria-label="${m.pinned ? "고정 해제" : "고정"}" title="${m.pinned ? "고정 해제" : "고정"}">${ICON.pin}</button>
+      <button type="button" data-act="toidea" aria-label="소재함으로 보내기" title="소재함으로 보내기">${ICON.idea}</button>
       <button type="button" data-act="edit" aria-label="첨부·할 일 편집" title="첨부·할 일 편집">${ICON.edit}</button>
       <button type="button" data-act="del" aria-label="삭제" title="삭제">${ICON.del}</button>
     </div></article>`;
@@ -1111,6 +1113,12 @@ $("#list").addEventListener("click", async (e) => {
     histOpenId = null; render(); toast("이전 버전으로 되돌렸습니다. 방금 내용도 이전 버전에 남아 있습니다.");
     return;
   }
+  if (act === "toidea") {
+    const text = [m.title || "", m.body || ""].filter(Boolean).join("\n").trim();
+    if (!text) { toast("글이 없는 메모는 소재로 보낼 수 없습니다"); return; }
+    openIdeaDlg({ mode: "new", text, memoId: m.id, fromMemo: true });
+    return;
+  }
   if (act === "edit") {
     if (editingId) return;
     editingId = id; confirmId = null;
@@ -1290,7 +1298,7 @@ function checkSelection() {
   if (!sel.rangeCount || sel.isCollapsed) { hideIdeaFab(); return; }
   const text = String(sel).replace(/ /g, " ").trim();
   const a = elOf(sel.anchorNode), f = elOf(sel.focusNode);
-  const art = a && a.closest(".memo:not(.inline):not(.editing)");
+  const art = a && a.closest(".memo:not(.editing)");
   if (!text || !art || !f || !art.contains(f) || !(a.closest(".m-body, .m-title") && f.closest(".m-body, .m-title"))) { hideIdeaFab(); return; }
   const r = sel.getRangeAt(0).getBoundingClientRect();
   fabSel = { text: text.slice(0, 2000), memoId: art.dataset.id };
@@ -1317,6 +1325,12 @@ function openIdeaDlg(st) {
   dlgState.box = allBoxes().includes(box) ? box : DEFAULT_BOXES[0];
   $("#ideaDlgTitle").textContent = st.mode === "edit" ? "소재 수정" : st.mode === "box" ? "새 소재함 만들기" : st.text ? "소재로 보관" : "소재 직접 쓰기";
   $("#ideaTextWrap").hidden = st.mode === "box";
+  $("#ideaMoveRow").hidden = !st.fromMemo;
+  if (st.fromMemo) {
+    const mm = memos.find((x) => x.id === st.memoId), hasFiles = mm && (mm.attachments || []).length > 0;
+    $("#ideaMove").checked = !hasFiles;
+    $("#ideaMoveHint").textContent = hasFiles ? "이 메모에는 사진·파일이 있어 메모 목록에 남겨 두기를 권합니다. 소재함에는 글만 옮겨집니다." : "끄면 메모 목록에도 그대로 남습니다.";
+  }
   $("#ideaNoteWrap").hidden = st.mode === "box";
   $("#ideaBoxPick").hidden = st.mode === "box";
   $("#ideaText").value = st.mode === "edit" ? st.idea.text : (st.text || "");
@@ -1358,9 +1372,27 @@ $("#ideaSave").addEventListener("click", () => {
     saveIdea(st.idea, { text, note, box: st.box, updated_at: now });
     ideaDlg.close(); render(); toast("소재를 수정했습니다"); return;
   }
-  const x = { id: newId(), user_id: uid, memo_id: st.memoId || null, box: st.box, text, note, used: false, created_at: now, updated_at: now };
+  const moving = st.fromMemo && $("#ideaMove").checked;
+  const x = { id: newId(), user_id: uid, memo_id: moving ? null : (st.memoId || null), box: st.box, text, note, used: false, created_at: now, updated_at: now };
   ideas.unshift(x); saveIdea(x, {});
-  ideaDlg.close(); render();
+  ideaDlg.close();
+  if (moving) {
+    const mm = memos.find((y) => y.id === st.memoId);
+    if (mm) {
+      if (inlineId === mm.id) { inlineId = null; inlineBase = null; clearTimeout(inlineTimer); }
+      memos = memos.filter((y) => y.id !== mm.id); saveCache();
+      pendingDeletes.set(mm.id, { memo: mm, timer: setTimeout(() => commitDelete(mm.id), 7000) });
+      render();
+      toast(`'${st.box}'(으)로 옮겼습니다`, "되돌리기", () => {
+        const p = pendingDeletes.get(mm.id);
+        if (p) { clearTimeout(p.timer); pendingDeletes.delete(mm.id); memos.push(p.memo); memos.sort((a, b) => ms(b.created_at) - ms(a.created_at)); saveCache(); }
+        ideas = ideas.filter((i) => i.id !== x.id); saveIdeas(); queue({ op: "delete", table: "clips", id: x.id });
+        render(); toast("옮기기 전으로 되돌렸습니다");
+      }, 7000);
+      return;
+    }
+  }
+  render();
   toast(`'${st.box}'에 보관했습니다`, view === "memo" ? "소재함 보기" : null, () => { ideaBox = st.box; setView("ideas"); });
 });
 
