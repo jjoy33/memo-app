@@ -342,3 +342,8 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .move-opt.current{opacity:.55}
 .move-opt.to-memo{border-style:dashed}
 .move-opt.to-memo{flex-direction:column;align-items:flex-start;gap:2px}
+
+/* 긴 소재 접기 */
+.idea-text.clipped{max-height:var(--clip,130px);overflow:hidden;cursor:pointer;
+  -webkit-mask-image:linear-gradient(to bottom,#000 55%,transparent);mask-image:linear-gradient(to bottom,#000 55%,transparent)}
+.idea-clip[aria-expanded="true"]{position:static;box-shadow:none}

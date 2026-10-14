@@ -1222,7 +1222,32 @@ function renderIdeas() {
   if (!list.length) { el.innerHTML = '<div class="empty"><strong>이 함에는 아직 소재가 없습니다</strong></div>'; return; }
   const activeN = list.filter((x) => !x.used).length;
   el.innerHTML = `<p class="idea-sum">쓸 소재 <b>${activeN}</b> · 다 쓴 소재 ${list.length - activeN}</p>` + list.map(ideaHTML).join("");
+  applyIdeaClips();
 }
+// 긴 소재는 윗부분만 보이게 접기 (펼친 소재는 이 기기에 기억)
+const IDEA_LONG = 210, IDEA_CLIP = 130;
+let openIdeas = new Set(lsGet("memo-open-ideas", []));
+function applyIdeaClips() {
+  document.querySelectorAll("#list .idea").forEach((card) => {
+    const t = card.querySelector(".idea-text"); if (!t) return;
+    let btn = card.querySelector(".idea-clip");
+    const long = !query && t.scrollHeight > IDEA_LONG;   // 검색 중에는 찾은 글자가 가려지지 않게 모두 펼침
+    if (!long) { t.classList.remove("clipped"); if (btn) btn.remove(); return; }
+    const open = openIdeas.has(card.dataset.iid);
+    t.classList.toggle("clipped", !open); t.style.setProperty("--clip", IDEA_CLIP + "px");
+    if (!btn) { btn = document.createElement("button"); btn.type = "button"; btn.className = "clip-btn idea-clip"; btn.dataset.ideact = "clip"; t.after(btn); }
+    btn.setAttribute("aria-expanded", String(open));
+    btn.textContent = open ? "접기 ▴" : "펼쳐서 전체 보기 ▾";
+  });
+}
+function toggleIdeaClip(card) {
+  const id = card.dataset.iid, opening = !openIdeas.has(id);
+  opening ? openIdeas.add(id) : openIdeas.delete(id);
+  lsSet("memo-open-ideas", [...openIdeas]);
+  applyIdeaClips();
+  if (!opening && card.getBoundingClientRect().top < 0) card.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+window.addEventListener("resize", () => { if (view === "ideas") applyIdeaClips(); });
 function ideaHTML(x) {
   const src = x.memo_id && memos.find((m) => m.id === x.memo_id);
   const t = ms(x.created_at);
@@ -1267,7 +1292,10 @@ $("#ideaBar").addEventListener("click", (e) => {
 });
 $("#list").addEventListener("click", (e) => {
   if (view !== "ideas") return;
-  const b = e.target.closest("[data-ideact]"), card = e.target.closest(".idea"); if (!b || !card) return;
+  const card = e.target.closest(".idea"); if (!card) return;
+  if (!e.target.closest("[data-ideact]") && e.target.closest(".idea-text.clipped")) { if (!String(getSelection()).length) toggleIdeaClip(card); return; }
+  const b = e.target.closest("[data-ideact]"); if (!b) return;
+  if (b.dataset.ideact === "clip") { toggleIdeaClip(card); return; }
   const x = ideas.find((i) => i.id === card.dataset.iid); if (!x) return;
   const act = b.dataset.ideact;
   if (act === "toggle") { saveIdea(x, { used: !x.used, updated_at: new Date().toISOString() }); render(); toast(x.used ? "다 쓴 소재로 흐리게 바꿨습니다" : "다시 쓸 소재로 켰습니다"); }
