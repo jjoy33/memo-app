@@ -27,7 +27,7 @@ const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY,
 /* ---------------- 상태 ---------------- */
 let uid = null, memos = [], outbox = [], flushing = false, channel = null;
 let editingId = null, editDraft = null, confirmId = null, pendingRender = false;
-let query = "", fileTarget = "composer";
+let query = "", fileTarget = "composer", fileEd = null, fileOnly = false;
 const urlCache = new Map();   // path -> {url, dl, exp}
 // 바로 수정(인라인) 상태
 let inlineId = null, inlineBase = null, inlineTimer = null;
@@ -418,9 +418,10 @@ const changed = (ed) => ed && ed.dispatchEvent(new Event("input", { bubbles: tru
 const IC = {
   img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>',
   table: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M10 4v16"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10.5 18a2 2 0 0 1-3-3l7.5-7.5"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/></svg>'
 };
-function toolsHTML() {
+function toolsHTML(withFile) {
   return `<div class="tools" role="toolbar" aria-label="글자 꾸미기">
     <div class="tgrp"><button type="button" class="tbtn" data-t="pop" data-pop="size" title="글자 크기" aria-label="글자 크기"><span class="t-size">가<small>가</small></span></button>
       <div class="pop" data-popid="size">${SIZES.map(([c, l]) => `<button type="button" data-t="size" data-v="${c}"><span class="${c}">${l}</span></button>`).join("")}</div></div>
@@ -433,6 +434,7 @@ function toolsHTML() {
     <span class="tsep"></span>
     <button type="button" class="tbtn" data-t="media" title="이미지·영상 넣기" aria-label="이미지·영상 넣기">${IC.img}</button>
     <button type="button" class="tbtn" data-t="table" title="표 넣기" aria-label="표 넣기">${IC.table}</button>
+    ${withFile ? `<button type="button" class="tbtn" data-t="file" title="파일 묶어 두기 (글 아래에 붙음)" aria-label="파일 묶어 두기">${IC.clip}</button>` : ""}
     <span class="tbl-ops"><span class="tsep"></span>
       <button type="button" class="tbtn txt" data-t="row+">줄 +</button><button type="button" class="tbtn txt" data-t="col+">칸 +</button>
       <button type="button" class="tbtn txt" data-t="row-">줄 −</button><button type="button" class="tbtn txt" data-t="col-">칸 −</button>
@@ -525,6 +527,7 @@ document.addEventListener("click", (e) => {
   else if (t === "bold") { restoreRange(ed); document.execCommand("bold"); }
   else if (t === "list") { restoreRange(ed); document.execCommand("insertUnorderedList"); }
   else if (t === "media") { mediaTarget = ed; mediaInput.click(); }
+  else if (t === "file") { fileTarget = "inline"; fileEd = ed; $("#fileInput").click(); }
   else tableOp(ed, t);
 });
 
@@ -571,10 +574,21 @@ async function attachToMemo(files, ed) {
   if (items.length < files.length) toast("50MB를 넘는 파일은 빼고 첨부합니다.");
   try {
     const added = await uploadFiles(m.id, items);
+    items.forEach((it, i) => { const a = added[i]; if (a && /^(image|video)\//.test(it.file.type)) urlCache.set(a.path, { url: URL.createObjectURL(it.file), exp: Date.now() + 3600 * 1000 }); });
     m.attachments = (m.attachments || []).concat(added);
     saveMemo(m, { updated_at: new Date().toISOString() });
-    toast("파일을 첨부했습니다. 수정을 마치면 아래에 보입니다.");
+    refreshAtts(m);
+    ensureUrls([m]).then(() => refreshAtts(m));
+    toast("파일 " + added.length + "개를 묶었습니다");
   } catch (err) { toast("올리지 못했습니다: " + err.message); }
+}
+// 메모를 다시 그리지 않고 첨부 목록만 새로 고침 (바로 수정 중에도 보이게)
+function refreshAtts(m) {
+  const art = document.querySelector(`#list .memo[data-id="${m.id}"]`); if (!art) return;
+  const old = art.querySelector(".atts"), html = attsHTML(m);
+  if (old && old.contains(document.activeElement)) { const ed = art.querySelector(".in-body"); if (ed) ed.focus({ preventScroll: true }); }   // 누른 ✕가 사라져도 수정 상태 유지
+  if (old) old.outerHTML = html || "";
+  else if (html) { const meta = art.querySelector(".m-meta"); if (meta) meta.insertAdjacentHTML("beforebegin", html); }
 }
 // 붙여넣기: 파일은 글 사이에, 웹에서 복사한 글은 안전하게 정리해서
 document.addEventListener("paste", (e) => {
@@ -673,11 +687,15 @@ function setTagFilter(t) {
 }
 function renderTagBar() {
   const tags = allTags(), bar = $("#tagBar"), active = query.startsWith("#") ? query.slice(1).toLowerCase() : "";
-  bar.hidden = !tags.length;
-  bar.innerHTML = tags.map(([t, n]) => `<button type="button" class="tag-filter${active === t.toLowerCase() ? " on" : ""}" data-tag="${esc(t)}" aria-pressed="${active === t.toLowerCase()}">#${esc(t)}<span>${n}</span></button>`).join("");
+  const nf = memos.filter(hasFile).length;
+  bar.hidden = !tags.length && !nf;
+  bar.innerHTML = (nf ? `<button type="button" class="tag-filter file-filter${fileOnly ? " on" : ""}" data-files="1" aria-pressed="${fileOnly}">📎 파일 있는 메모<span>${nf}</span></button>` : "") + tags.map(([t, n]) => `<button type="button" class="tag-filter${active === t.toLowerCase() ? " on" : ""}" data-tag="${esc(t)}" aria-pressed="${active === t.toLowerCase()}">#${esc(t)}<span>${n}</span></button>`).join("");
   $("#tagList").innerHTML = tags.map(([t]) => `<option value="${esc(t)}">`).join("");
 }
-$("#tagBar").addEventListener("click", (e) => { const b = e.target.closest("[data-tag]"); if (b) setTagFilter(b.dataset.tag); });
+$("#tagBar").addEventListener("click", (e) => {
+  if (e.target.closest("[data-files]")) { fileOnly = !fileOnly; render(); return; }
+  const b = e.target.closest("[data-tag]"); if (b) setTagFilter(b.dataset.tag);
+});
 
 /* ---------------- 입력창 ---------------- */
 const cBody = $("#cBody"), cTitle = $("#cTitle"), form = $("#composer");
@@ -748,7 +766,9 @@ $("#cPending").addEventListener("click", (e) => {
 $("#cAttach").onclick = () => { fileTarget = "composer"; $("#fileInput").click(); };
 $("#fileInput").addEventListener("change", (e) => {
   const files = [...e.target.files];
-  if (fileTarget === "edit") addFiles(files, "edit"); else insertFiles(files, cBody);
+  if (fileTarget === "edit") addFiles(files, "edit");
+  else if (fileTarget === "inline" && fileEd && document.contains(fileEd)) attachToMemo(files, fileEd);
+  else addFiles(files, "composer");   // 📎 파일: 글 아래에 묶어 두기 (사진도 파일로)
   e.target.value = "";
 });
 
@@ -854,8 +874,15 @@ function richText(raw) {
 }
 function attsHTML(m) {
   const atts = (m.attachments || []).filter((a) => !a.inline); if (!atts.length) return "";
-  return '<div class="atts">' + atts.map((a) => {
-    const c = urlCache.get(a.path), k = kind(a), i = (m.attachments || []).indexOf(a);
+  const rm = m.id === inlineId;
+  return `<div class="atts${rm ? " rm-on" : ""}">` + atts.map((a) => {
+    const i = (m.attachments || []).indexOf(a), x = rm ? `<button type="button" class="att-x" data-act="att-rm" data-i="${i}" aria-label="${esc(a.name)} 빼기" title="이 파일 빼기">✕</button>` : "";
+    return x ? `<div class="att-cell${kind(a) !== "image" ? " wide" : ""}">${attOne(a, i)}${x}</div>` : attOne(a, i);
+  }).join("") + "</div>";
+}
+function attOne(a, i) {
+  {
+    const c = urlCache.get(a.path), k = kind(a);
     if (k === "image") return c ? `<button type="button" class="att-img" data-act="view" data-i="${i}" aria-label="${esc(a.name)} 크게 보기"><img src="${esc(c.url)}" alt="${esc(a.name)}" loading="lazy"></button>`
       : `<div class="att-ph">${navigator.onLine ? "불러오는 중" : "오프라인"}</div>`;
     if (k === "video" && c) return `<video class="att-video" src="${esc(c.url)}" controls playsinline preload="metadata"></video>`;
@@ -863,7 +890,7 @@ function attsHTML(m) {
     const href = c ? esc(c.dl || c.url) : "#";
     return `<a class="att-file" href="${href}" target="_blank" rel="noopener"${c ? "" : ' aria-disabled="true"'}>
       <span class="ext">${esc(extOf(a.name) || "file")}</span><span class="fname">${hl(a.name)}</span><span class="fsize">${fmtSize(a.size || 0)}</span></a>`;
-  }).join("") + "</div>";
+  }
 }
 function metaHTML(m) {
   const c = ms(m.created_at), u = ms(m.updated_at), edited = u - c > 60000, hist = m.history || [];
@@ -908,7 +935,7 @@ function memoHTML(m) {
   const inline = m.id === inlineId;
   const text = inline
     ? `<input class="in-title" type="text" maxlength="120" placeholder="제목 (선택)" value="${esc(m.title || "")}">
-       ${toolsHTML()}
+       ${toolsHTML(true)}
        <div class="m-body rich editor in-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="메모 내용" data-ph="내용">${editHTML(m)}</div>
        ${tagEditorHTML(m.tags || [])}`
     : `${m.title ? `<h3 class="m-title editable">${tagText(m.title)}</h3>` : ""}
@@ -939,17 +966,18 @@ function matches(m, q) {
   return tags.some((x) => x.includes(q)) || (m.title || "").toLowerCase().includes(q) || (m.body || "").toLowerCase().includes(q) ||
     (m.attachments || []).some((a) => (a.name || "").toLowerCase().includes(q));
 }
+const hasFile = (m) => (m.attachments || []).some((a) => !a.inline);
 function render() {
   if (!uid) return;
   syncViewChrome();
   if (view === "ideas") { renderIdeas(); return; }
-  const q = query.toLowerCase(), list = memos.filter((m) => matches(m, q));
-  $("#count").textContent = q ? list.length + "/" + memos.length : memos.length ? memos.length + "개" : "";
+  const q = query.toLowerCase(), list = memos.filter((m) => matches(m, q) && (!fileOnly || hasFile(m)));
+  $("#count").textContent = q || fileOnly ? list.length + "/" + memos.length : memos.length ? memos.length + "개" : "";
   const used = memos.reduce((s, m) => s + (m.attachments || []).reduce((t, a) => t + (a.size || 0), 0), 0);
   $("#accUsage").textContent = "첨부 " + fmtSize(used) + " / " + fmtSize(STORAGE_CAP);
   const el = $("#list");
   if (!memos.length) el.innerHTML = '<div class="empty"><strong>아직 메모가 없습니다</strong>위 입력창에 적거나 이미지·파일을 붙여넣으면 날짜와 시간이 함께 기록됩니다.</div>';
-  else if (!list.length) el.innerHTML = '<div class="empty"><strong>검색 결과가 없습니다</strong>다른 단어로 찾아보세요.</div>';
+  else if (!list.length) el.innerHTML = `<div class="empty"><strong>${fileOnly ? "조건에 맞는 메모가 없습니다" : "검색 결과가 없습니다"}</strong>${fileOnly ? "위의 '📎 파일 있는 메모'를 다시 누르면 모든 메모가 보입니다." : "다른 단어로 찾아보세요."}</div>`;
   else {
     const pinned = list.filter((m) => m.pinned), rest = list.filter((m) => !m.pinned);
     let html = "";
@@ -1080,7 +1108,7 @@ $("#composer").addEventListener("focusout", () => afterPointer(() => {
 $("#list").addEventListener("focusout", (e) => {
   if (!inlineId || !document.hasFocus()) return;   // 파일 선택 창이 열린 경우는 계속 수정 중
   const art = e.target.closest(".memo.inline"); if (!art) return;
-  if (e.relatedTarget && art.contains(e.relatedTarget)) return;
+  if (e.relatedTarget && (art.contains(e.relatedTarget) || e.relatedTarget.closest(".toast"))) return;   // 되돌리기 버튼을 눌러도 계속 수정 중
   setTimeout(() => { if (inlineId && !document.activeElement.closest(".memo.inline") && document.hasFocus() && !pointerDown) finishInline(); }, 0);
 });
 $("#list").addEventListener("keydown", (e) => {
@@ -1122,6 +1150,18 @@ $("#list").addEventListener("click", async (e) => {
   const id = art.dataset.id, m = memos.find((x) => x.id === id); if (!m) return;
   const act = btn.dataset.act;
   if (act === "clip") { toggleClip(art); return; }
+  if (act === "att-rm") {
+    const a = m.attachments[+btn.dataset.i]; if (!a) return;
+    m.attachments = m.attachments.filter((x) => x !== a);
+    saveMemo(m, { updated_at: new Date().toISOString() }); refreshAtts(m);
+    const timer = setTimeout(() => { if (navigator.onLine) sb.storage.from(BUCKET).remove([a.path]); }, 8000);
+    toast("'" + a.name + "' 파일을 뺐습니다", "되돌리기", () => {
+      clearTimeout(timer); const mm = memos.find((x) => x.id === id); if (!mm) return;
+      mm.attachments = (mm.attachments || []).concat(a); saveMemo(mm, { updated_at: new Date().toISOString() });
+      if (inlineId === id) refreshAtts(mm); else render();
+    }, 8000);
+    return;
+  }
   if (act === "view") { const a = m.attachments[+btn.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
   if (act === "done") { saveMemo(m, { done: !m.done }); return render(); }
   if (act === "pin") { saveMemo(m, { pinned: !m.pinned }); return render(); }

@@ -356,3 +356,15 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .c-idea-boxes{display:contents}
 .c-idea-row .chip{background:var(--surface)}
 .c-idea-row .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--fg);font-weight:700;box-shadow:inset 0 0 0 1px var(--accent)}
+
+/* v5.6 파일 묶음 */
+.chip.file-chip{display:inline-flex;align-items:center;gap:4px}
+.chip.file-chip svg{width:16px;height:16px}
+.att-cell{position:relative;min-width:0}
+.att-cell.wide{grid-column:1/-1}
+.att-cell > *{width:100%}
+.att-x{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.62);color:#fff;font-size:13px;line-height:26px;padding:0;cursor:pointer;z-index:2}
+.att-x:hover{background:var(--danger,#c0392b)}
+.att-cell.wide .att-x{top:50%;transform:translateY(-50%);right:8px}
+.att-cell.wide .att-file{padding-right:44px}
+.tag-filter.file-filter{font-weight:600}
