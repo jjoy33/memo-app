@@ -841,7 +841,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 /* ---------------- 목록 그리기 ---------------- */
-function requestRender() { if (editingId || inlineId) { pendingRender = true; return; } render(); }
+function requestRender() { if (editingId || inlineId || ideaInline) { pendingRender = true; return; } render(); }
 function softRender() { if (pointerDown) renderAfterPointer = true; else setTimeout(requestRender, 0); }
 let histOpenId = null, inlineDirty = false;
 function hl(raw) {
@@ -1100,6 +1100,7 @@ $("#list").addEventListener("input", (e) => {
 document.addEventListener("pointerdown", (e) => {
   pointerDown = true;
   if (inlineId && e.target.closest && !e.target.closest(".memo.inline, .toast, dialog")) finishInline();
+  if (ideaInline && e.target.closest && !e.target.closest(".idea.inline, .toast, dialog")) finishIdeaInline(true);
 }, true);
 const afterPointerQ = [];
 const afterPointer = (fn) => { if (pointerDown) afterPointerQ.push(fn); else setTimeout(fn, 0); };
@@ -1277,6 +1278,7 @@ function setView(v) {
   if (view === v) return;
   if (inlineId) finishInline();
   query = ""; $("#q").value = "";
+  if (ideaInline) finishIdeaInline(true);
   view = v; fileOnly = false; hideIdeaFab(); window.scrollTo({ top: 0 }); render();
 }
 $("#tabMemo").addEventListener("click", () => setView("memo"));
@@ -1335,11 +1337,14 @@ function toggleIdeaClip(card) {
 window.addEventListener("resize", () => { if (view === "ideas") applyIdeaClips(); });
 function ideaHTML(x) {
   const src = x.memo_id && memos.find((m) => m.id === x.memo_id);
-  const t = ms(x.created_at);
-  return `<article class="idea${x.used ? " off" : ""}${x._local ? " unsynced" : ""}" data-iid="${x.id}">
+  const t = ms(x.created_at), ed = ideaInline === x.id;
+  return `<article class="idea${x.used ? " off" : ""}${x._local ? " unsynced" : ""}${ed ? " inline" : ""}" data-iid="${x.id}">
     <div class="idea-main">
-      <blockquote class="idea-text">${hl(x.text).replace(/\n/g, "<br>")}</blockquote>
-      ${x.note ? `<p class="idea-note">${hl(x.note)}</p>` : ""}
+      ${ed ? `<textarea class="idea-ed-text" rows="2" maxlength="2000" aria-label="소재 내용">${esc(x.text)}</textarea>
+      <input class="idea-ed-note" type="text" maxlength="200" placeholder="한 줄 메모 (선택)" value="${esc(x.note || "")}" aria-label="한 줄 메모">
+      <p class="idea-ed-help">바깥을 누르면 저장 · Esc 취소</p>`
+      : `<blockquote class="idea-text editable" title="눌러서 바로 고치기">${hl(x.text).replace(/\n/g, "<br>")}</blockquote>
+      ${x.note ? `<p class="idea-note editable" title="눌러서 바로 고치기">${hl(x.note)}</p>` : ""}`}
       <div class="idea-meta">
         <span class="idea-box">${esc(x.box)}</span>
         <time title="${fullStamp(t)}">${dateStr(t)}</time>
@@ -1357,6 +1362,41 @@ function ideaHTML(x) {
     </div>
   </article>`;
 }
+/* 소재 바로 고치기: 글자를 누르면 그 자리에서 수정, 바깥을 누르면 저장 */
+var ideaInline = null;
+function fitArea(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
+function startIdeaInline(id, toNote) {
+  if (ideaInline === id) return;
+  if (ideaInline) finishIdeaInline(true);
+  if (inlineId) finishInline();
+  ideaInline = id; hideIdeaFab(); render();
+  const card = document.querySelector(`.idea[data-iid="${id}"]`); if (!card) return;
+  const ta = card.querySelector(".idea-ed-text"), el = toNote ? card.querySelector(".idea-ed-note") : ta;
+  fitArea(ta); el.focus({ preventScroll: true });
+  if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+}
+function finishIdeaInline(save) {
+  const id = ideaInline; if (!id) return;
+  const card = document.querySelector(`.idea[data-iid="${id}"]`), x = ideas.find((i) => i.id === id);
+  ideaInline = null; pendingRender = false;
+  if (x && card && save) {
+    const text = card.querySelector(".idea-ed-text").value.trim(), note = card.querySelector(".idea-ed-note").value.trim();
+    if (!text) toast("소재 내용이 비어 있어 원래대로 두었습니다");
+    else if (text !== x.text || note !== (x.note || "")) {
+      const before = { text: x.text, note: x.note || "" };
+      saveIdea(x, { text, note, updated_at: new Date().toISOString() });
+      toast("소재를 고쳤습니다", "되돌리기", () => { saveIdea(x, { ...before, updated_at: new Date().toISOString() }); render(); });
+    }
+  }
+  softRender();
+}
+document.addEventListener("input", (e) => { if (e.target.classList && e.target.classList.contains("idea-ed-text")) fitArea(e.target); });
+document.addEventListener("keydown", (e) => {
+  if (!ideaInline || !e.target.closest || !e.target.closest(".idea.inline")) return;
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === "Escape") { e.preventDefault(); finishIdeaInline(false); }
+  else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.target.classList.contains("idea-ed-note"))) { e.preventDefault(); finishIdeaInline(true); }
+});
 function saveIdea(x, patch) {
   Object.assign(x, patch, { _local: true }); saveIdeas();
   const { _local, ...row } = x;
@@ -1378,7 +1418,10 @@ $("#ideaBar").addEventListener("click", (e) => {
 $("#list").addEventListener("click", (e) => {
   if (view !== "ideas") return;
   const card = e.target.closest(".idea"); if (!card) return;
+  if (card.classList.contains("inline") && !e.target.closest("[data-ideact]")) return;
   if (!e.target.closest("[data-ideact]") && e.target.closest(".idea-text.clipped")) { if (!String(getSelection()).length) toggleIdeaClip(card); return; }
+  const tx = !e.target.closest("[data-ideact], a") && e.target.closest(".idea-text, .idea-note");
+  if (tx) { if (!String(getSelection()).length) startIdeaInline(card.dataset.iid, tx.classList.contains("idea-note")); return; }
   const b = e.target.closest("[data-ideact]"); if (!b) return;
   if (b.dataset.ideact === "clip") { toggleIdeaClip(card); return; }
   const x = ideas.find((i) => i.id === card.dataset.iid); if (!x) return;
