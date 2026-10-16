@@ -1490,7 +1490,7 @@ const ideaFab = $("#ideaFab");
 let fabSel = null, fabTimer;
 function hideIdeaFab() { ideaFab.hidden = true; fabSel = null; }
 function checkSelection() {
-  if (view !== "memo") { hideIdeaFab(); return; }
+  if (view !== "memo" && view !== "kakao") { hideIdeaFab(); return; }   // 메모·카톡정리 탭 모두
   const sel = getSelection();
   if (!sel.rangeCount || sel.isCollapsed) { hideIdeaFab(); return; }
   const text = String(sel).replace(/ /g, " ").trim();
