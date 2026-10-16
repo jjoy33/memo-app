@@ -989,7 +989,7 @@ const hasFile = (m) => (m.attachments || []).some((a) => !a.inline);
 function render() {
   if (!uid) return;
   syncViewChrome();
-  if (view === "ideas") { renderIdeas(); return; }
+  if (view === "ideas") { renderIdeas(); applySel(); return; }
   const pool = viewMemos(), kk = view === "kakao";
   const q = query.toLowerCase(), list = pool.filter((m) => matches(m, q) && (!fileOnly || hasFile(m)));
   $("#count").textContent = q || fileOnly ? list.length + "/" + pool.length : pool.length ? pool.length + "개" : "";
@@ -1012,6 +1012,7 @@ function render() {
   ensureUrls(list);
   applyClips();
   markIdeas();
+  applySel();
 }
 
 /* ---------------- 소재로 보관한 부분 색 표시 ---------------- */
@@ -1333,6 +1334,7 @@ function setView(v) {
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabIdeas").addEventListener("click", () => setView("ideas"));
 $("#tabKakao").addEventListener("click", () => setView("kakao"));
+["#tabMemo", "#tabIdeas", "#tabKakao"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
 function renderIdeas() {
@@ -1701,4 +1703,149 @@ sb.auth.getSession().then(({ data }) => {
   const u = data.session && data.session.user;
   if (u) { if (u.id !== uid) start(u); } else if (!uid) showAuth();
 });
+/* ---------------- 여러 개 골라서 지우기 (PC) ----------------
+   · 카드 빈 곳(날짜 줄·여백)을 누르면 그 카드 하나 선택
+   · Ctrl(맥은 ⌘)+클릭: 하나씩 더하거나 빼기 / Shift+클릭: 앞서 고른 카드부터 여기까지 한 번에
+   · 카드 바깥 빈 곳에서 마우스를 끌면 네모 안에 걸친 카드 모두 선택
+   · Delete 키 또는 아래 막대의 '삭제' → 한 번 더 확인 → 삭제 (7초 안에 되돌리기)
+   · Esc 또는 카드 바깥 빈 곳 클릭: 선택 해제 */
+let selIds = new Set(), selAnchor = null, selConfirm = false, rubberJustEnded = false;
+const cardSel = () => view === "ideas" ? "#list .idea[data-iid]:not(.inline)" : "#list .memo[data-id]:not(.inline):not(.editing)";
+const cardId = (c) => c.dataset.iid || c.dataset.id;
+const cards = () => [...document.querySelectorAll(cardSel())];
+const cardOf = (t) => t && t.closest && t.closest(view === "ideas" ? ".idea[data-iid]" : ".memo[data-id]");
+const INTERACTIVE = "button, a, input, textarea, select, video, label, [contenteditable='true'], .tools, .confirm, .hist, .atts";
+function applySel() {
+  const all = cards(), ids = new Set(all.map(cardId));
+  selIds.forEach((id) => { if (!ids.has(id)) selIds.delete(id); });
+  all.forEach((c) => c.classList.toggle("sel", selIds.has(cardId(c))));
+  renderSelBar();
+}
+function setSel(ids, anchor) { selIds = new Set(ids); if (anchor !== undefined) selAnchor = anchor; selConfirm = false; applySel(); }
+function clearSel() { if (!selIds.size && !selConfirm) return; selIds.clear(); selAnchor = null; selConfirm = false; applySel(); }
+const selBar = document.createElement("div");
+selBar.className = "sel-bar"; selBar.hidden = true; selBar.setAttribute("role", "toolbar"); selBar.setAttribute("aria-label", "선택한 카드");
+document.body.appendChild(selBar);
+function renderSelBar() {
+  const n = selIds.size; selBar.hidden = !n;
+  if (!n) { selConfirm = false; return; }
+  const what = view === "ideas" ? "소재" : view === "kakao" ? "카톡정리" : "메모";
+  selBar.classList.toggle("confirm", selConfirm);
+  selBar.innerHTML = selConfirm
+    ? `<span class="sel-n"><b>${what} ${n}개</b>를 삭제할까요?</span><button type="button" class="sel-del" data-sel="yes">삭제</button><button type="button" data-sel="no">취소</button>`
+    : `<span class="sel-n"><b>${n}개</b> 선택</span><button type="button" class="sel-del" data-sel="del">삭제</button><button type="button" data-sel="all">모두 선택</button><button type="button" data-sel="clear">선택 해제</button>`;
+}
+selBar.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-sel]"); if (!b) return;
+  const a = b.dataset.sel;
+  if (a === "del") { selConfirm = true; renderSelBar(); selBar.querySelector('[data-sel="yes"]').focus(); }
+  else if (a === "no") { selConfirm = false; renderSelBar(); }
+  else if (a === "yes") deleteSelected();
+  else if (a === "all") setSel(cards().map(cardId));
+  else if (a === "clear") clearSel();
+});
+function deleteSelected() {
+  const ids = [...selIds]; if (!ids.length) return;
+  selIds.clear(); selAnchor = null; selConfirm = false;
+  if (view === "ideas") {
+    const gone = ideas.filter((x) => ids.includes(x.id));
+    ideas = ideas.filter((x) => !ids.includes(x.id)); saveIdeas();
+    gone.forEach((x) => ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); queue({ op: "delete", table: "clips", id: x.id }); }, 8000) }));
+    render();
+    toast(`소재 ${gone.length}개를 삭제했습니다`, "되돌리기", () => {
+      gone.forEach((x) => { const p = ideaDeletes.get(x.id); if (!p) return; clearTimeout(p.timer); ideaDeletes.delete(x.id); ideas.push(x); });
+      saveIdeas(); render(); toast(`소재 ${gone.length}개를 되살렸습니다`);
+    }, 8000);
+    return;
+  }
+  const gone = memos.filter((m) => ids.includes(m.id));
+  memos = memos.filter((m) => !ids.includes(m.id)); saveCache();
+  gone.forEach((m) => pendingDeletes.set(m.id, { memo: m, timer: setTimeout(() => commitDelete(m.id), 8000) }));
+  render();
+  toast(`${gone.length}개를 삭제했습니다`, "되돌리기", () => {
+    gone.forEach((m) => { const p = pendingDeletes.get(m.id); if (!p) return; clearTimeout(p.timer); pendingDeletes.delete(m.id); memos.push(p.memo); });
+    memos.sort((a, b) => ms(b.created_at) - ms(a.created_at)); saveCache(); render(); toast(`${gone.length}개를 되살렸습니다`);
+  }, 8000);
+}
+// 클릭으로 고르기 — 다른 동작(바로 고치기 등)보다 먼저 처리
+document.addEventListener("mousedown", (e) => {
+  if ((e.shiftKey || e.ctrlKey || e.metaKey) && cardOf(e.target) && !e.target.closest(INTERACTIVE)) e.preventDefault();   // 글자 선택이 생기지 않게
+}, true);
+document.addEventListener("click", (e) => {
+  if (view !== "memo" && view !== "kakao" && view !== "ideas") return;
+  if (rubberJustEnded) { rubberJustEnded = false; e.stopPropagation(); e.preventDefault(); return; }
+  if (e.target.closest(".sel-bar, .toast, dialog, .idea-fab")) return;
+  const c = cardOf(e.target);
+  if (!c || c.classList.contains("inline") || c.classList.contains("editing")) {
+    // 카드 바깥 빈 곳을 누르면 선택 해제
+    if (!c && selIds.size && !e.target.closest(INTERACTIVE + ", header, #composer, .tag-bar")) clearSel();
+    return;
+  }
+  if (e.target.closest(INTERACTIVE)) return;
+  const id = cardId(c), mod = e.ctrlKey || e.metaKey;
+  if (e.shiftKey) {
+    const all = cards().map(cardId), a = all.indexOf(selAnchor ?? id), b = all.indexOf(id);
+    const range = all.slice(Math.min(a < 0 ? b : a, b), Math.max(a < 0 ? b : a, b) + 1);
+    setSel(mod ? [...selIds, ...range] : range);
+  } else if (mod) {
+    const n = new Set(selIds); n.has(id) ? n.delete(id) : n.add(id); setSel(n, id);
+  } else {
+    // 글자 부분은 원래대로 바로 고치기. 다만 이미 고른 카드가 있으면 이 카드만 고르기
+    const onText = e.target.closest(".editable, .idea-text, .idea-note, .m-body, .m-title");
+    if (onText && !selIds.size) return;
+    if (String(getSelection()).length) return;
+    setSel([id], id);
+  }
+  e.stopPropagation(); e.preventDefault();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (!selIds.size) return;
+  const typing = e.target.closest && e.target.closest("input, textarea, [contenteditable='true']");
+  if (typing) return;
+  if (e.key === "Escape") { e.preventDefault(); if (selConfirm) { selConfirm = false; renderSelBar(); } else clearSel(); }
+  else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (selConfirm) deleteSelected(); else { selConfirm = true; renderSelBar(); } }
+  else if (e.key === "Enter" && selConfirm && !e.target.closest("button")) { e.preventDefault(); deleteSelected(); }
+});
+// 빈 곳에서 끌어서 네모로 고르기 (마우스만)
+{
+  let rb = null;
+  const box = document.createElement("div"); box.className = "rubber"; box.hidden = true; document.body.appendChild(box);
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0 || $("#appView").hidden) return;
+    if (view !== "memo" && view !== "kakao" && view !== "ideas") return;
+    const t = e.target;
+    if (cardOf(t) || t.closest(INTERACTIVE + ", header, #composer, .tag-bar, .sel-bar, .toast, dialog, .notice, .idea-fab, .to-top")) return;
+    if (e.clientX >= document.documentElement.clientWidth) return;   // 스크롤 막대
+    rb = { x: e.clientX, y: e.clientY + scrollY, add: e.ctrlKey || e.metaKey || e.shiftKey, base: new Set(selIds), moved: false, cx: e.clientX, cy: e.clientY };
+  });
+  const update = () => {
+    if (!rb) return;
+    const x1 = Math.min(rb.x, rb.cx), x2 = Math.max(rb.x, rb.cx);
+    const yA = rb.y, yB = rb.cy + scrollY, y1 = Math.min(yA, yB), y2 = Math.max(yA, yB);
+    Object.assign(box.style, { left: x1 + "px", top: (y1 - scrollY) + "px", width: (x2 - x1) + "px", height: (y2 - y1) + "px" });
+    const hit = cards().filter((c) => { const r = c.getBoundingClientRect(); return r.right > x1 && r.left < x2 && r.bottom + scrollY > y1 && r.top + scrollY < y2; }).map(cardId);
+    selIds = new Set(rb.add ? [...rb.base, ...hit] : hit); selConfirm = false; applySel();
+  };
+  let scrollTimer = null;
+  const autoScroll = () => {
+    clearInterval(scrollTimer); scrollTimer = null;
+    if (!rb || !rb.moved) return;
+    const dy = rb.cy < 50 ? -14 : rb.cy > innerHeight - 50 ? 14 : 0;
+    if (dy) scrollTimer = setInterval(() => { scrollBy(0, dy); update(); }, 30);
+  };
+  document.addEventListener("pointermove", (e) => {
+    if (!rb) return;
+    rb.cx = e.clientX; rb.cy = e.clientY;
+    if (!rb.moved && Math.hypot(e.clientX - rb.x, e.clientY + scrollY - rb.y) < 6) return;
+    if (!rb.moved) { rb.moved = true; box.hidden = false; getSelection().removeAllRanges(); document.body.classList.add("rubbering"); }
+    e.preventDefault(); update(); autoScroll();
+  });
+  const end = () => {
+    if (!rb) return;
+    if (rb.moved) { rubberJustEnded = true; setTimeout(() => { rubberJustEnded = false; }, 0); const all = cards().map(cardId); selAnchor = all.find((id) => selIds.has(id)) ?? null; }
+    rb = null; box.hidden = true; clearInterval(scrollTimer); document.body.classList.remove("rubbering");
+  };
+  document.addEventListener("pointerup", end);
+  document.addEventListener("pointercancel", end);
+}
 })();

@@ -385,3 +385,15 @@ dialog h2{margin:0 0 8px;font-size:17px}
 :root[data-theme="dark"]{--idea-mark:#55409a;--idea-used:#3a414a}
 ::highlight(idea-clip){background-color:var(--idea-mark);color:inherit}
 ::highlight(idea-clip-used){background-color:var(--idea-used);color:inherit}
+
+/* 여러 개 골라서 지우기 */
+.memo.sel,.idea.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);background:color-mix(in srgb,var(--accent-soft) 70%,var(--surface))}
+.rubber{position:fixed;z-index:45;border:1.5px dashed var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border-radius:4px;pointer-events:none}
+body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
+.sel-bar{position:fixed;z-index:42;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;
+  background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 6px 6px 16px;box-shadow:0 10px 30px -10px rgba(0,0,0,.35);font-size:14px;white-space:nowrap;max-width:calc(100vw - 32px)}
+.sel-bar[hidden]{display:none}
+.sel-bar button{border:1px solid var(--line);background:none;color:var(--fg);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:600}
+.sel-bar button:hover{border-color:var(--accent)}
+.sel-bar .sel-del{background:var(--danger);border-color:var(--danger);color:#fff}
+.sel-bar.confirm{border-color:var(--danger)}
