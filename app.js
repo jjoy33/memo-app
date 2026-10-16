@@ -1334,7 +1334,6 @@ function setView(v) {
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabIdeas").addEventListener("click", () => setView("ideas"));
 $("#tabKakao").addEventListener("click", () => setView("kakao"));
-$("#selModeBtn").addEventListener("click", () => setSelMode(!selMode));
 ["#tabMemo", "#tabIdeas", "#tabKakao"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
@@ -1711,13 +1710,32 @@ sb.auth.getSession().then(({ data }) => {
    · Delete 키 또는 아래 막대의 '삭제' → 한 번 더 확인 → 삭제 (7초 안에 되돌리기)
    · Esc 또는 카드 바깥 빈 곳 클릭: 선택 해제 */
 let selIds = new Set(), selAnchor = null, selConfirm = false, rubberJustEnded = false;
-// 선택 모드: '선택' 버튼을 켜면 카드를 누를 때마다 체크됩니다 (폰에서 쓰는 방법)
-let selMode = false;
+// 선택 모드: 카드 빈 곳(날짜 줄·여백)을 길게 누르면 켜지고, 그다음부터는 카드를 누를 때마다 체크됩니다
+let selMode = false, longPressFired = false;
+// 길게 누르기: 글자(제목·본문·소재 문장)는 문장 선택용이라 제외하고, 카드의 빈 곳에서만 작동
+const TEXT_AREA = ".m-title, .m-body, .idea-text, .idea-note";
+{
+  let lp = null;
+  const cancel = () => { if (lp) { clearTimeout(lp.timer); lp = null; } };
+  document.addEventListener("pointerdown", (e) => {
+    cancel(); longPressFired = false;   // 길게 누른 뒤 손을 떼면 클릭이 안 생기는 기기도 있어, 다음 터치에서 풀어 줌
+    if (selMode || (e.pointerType === "mouse" && e.button !== 0)) return;
+    const c = cardOf(e.target);
+    if (!c || c.classList.contains("inline") || c.classList.contains("editing")) return;
+    if (e.target.closest(TEXT_AREA + ", " + INTERACTIVE)) return;
+    lp = { x: e.clientX, y: e.clientY, timer: setTimeout(() => {
+      lp = null; longPressFired = true;
+      if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {}
+      const id = cardId(c); setSelMode(true); setSel([id], id);
+    }, 480) };
+  });
+  document.addEventListener("pointermove", (e) => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel(); });
+  ["pointerup", "pointercancel"].forEach((t) => document.addEventListener(t, cancel));
+  document.addEventListener("contextmenu", (e) => { if (longPressFired || (selMode && cardOf(e.target))) e.preventDefault(); });
+}
 function setSelMode(on) {
   selMode = on; if (!on) { selIds.clear(); selAnchor = null; selConfirm = false; }
   if (on) { if (inlineId) finishInline(); if (ideaInline) finishIdeaInline(true); getSelection().removeAllRanges(); hideIdeaFab(); }
-  $("#selModeBtn").setAttribute("aria-pressed", String(on));
-  $("#selModeBtn span").textContent = on ? "완료" : "선택";
   applySel();
 }
 const cardSel = () => view === "ideas" ? "#list .idea[data-iid]:not(.inline)" : "#list .memo[data-id]:not(.inline):not(.editing)";
@@ -1787,7 +1805,8 @@ document.addEventListener("mousedown", (e) => {
 document.addEventListener("click", (e) => {
   if (view !== "memo" && view !== "kakao" && view !== "ideas") return;
   if (rubberJustEnded) { rubberJustEnded = false; e.stopPropagation(); e.preventDefault(); return; }
-  if (e.target.closest(".sel-bar, .toast, dialog, .idea-fab, #selModeBtn")) return;
+  if (e.target.closest(".sel-bar, .toast, dialog, .idea-fab")) return;
+  if (longPressFired) { longPressFired = false; e.stopPropagation(); e.preventDefault(); return; }
   const c = cardOf(e.target);
   if (selMode) {
     if (!c) return;
