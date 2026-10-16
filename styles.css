@@ -397,3 +397,18 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 .sel-bar button:hover{border-color:var(--accent)}
 .sel-bar .sel-del{background:var(--danger);border-color:var(--danger);color:#fff}
 .sel-bar.confirm{border-color:var(--danger)}
+
+/* 선택 모드 (폰) */
+.search-row{display:flex;gap:8px;align-items:center}
+.search-row .search{flex:1;min-width:0}
+.sel-mode-btn{flex:none;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 14px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;font-size:14px;font-weight:600}
+.sel-mode-btn svg{width:17px;height:17px;color:var(--muted)}
+.sel-mode-btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.sel-mode-btn[aria-pressed="true"] svg{color:inherit}
+#list.sel-mode .memo,#list.sel-mode .idea{position:relative;padding-left:46px;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#list.sel-mode .memo::before,#list.sel-mode .idea::before{content:"";position:absolute;left:14px;top:16px;width:20px;height:20px;border-radius:50%;border:2px solid var(--muted);background:var(--surface);box-sizing:border-box}
+#list.sel-mode .memo.sel::before,#list.sel-mode .idea.sel::before{border-color:var(--accent);background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center/14px no-repeat}
+#list.sel-mode .memo *,#list.sel-mode .idea *{pointer-events:none}
+.sel-bar button:disabled{opacity:.45}
+@media (max-width:480px){.sel-bar{gap:6px;padding:5px 5px 5px 12px;font-size:13px}.sel-bar button{padding:5px 10px}}
+#list.sel-mode,#list:has(.sel){padding-bottom:140px}

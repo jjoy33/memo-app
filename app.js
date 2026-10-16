@@ -1334,6 +1334,7 @@ function setView(v) {
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabIdeas").addEventListener("click", () => setView("ideas"));
 $("#tabKakao").addEventListener("click", () => setView("kakao"));
+$("#selModeBtn").addEventListener("click", () => setSelMode(!selMode));
 ["#tabMemo", "#tabIdeas", "#tabKakao"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
@@ -1710,6 +1711,15 @@ sb.auth.getSession().then(({ data }) => {
    · Delete 키 또는 아래 막대의 '삭제' → 한 번 더 확인 → 삭제 (7초 안에 되돌리기)
    · Esc 또는 카드 바깥 빈 곳 클릭: 선택 해제 */
 let selIds = new Set(), selAnchor = null, selConfirm = false, rubberJustEnded = false;
+// 선택 모드: '선택' 버튼을 켜면 카드를 누를 때마다 체크됩니다 (폰에서 쓰는 방법)
+let selMode = false;
+function setSelMode(on) {
+  selMode = on; if (!on) { selIds.clear(); selAnchor = null; selConfirm = false; }
+  if (on) { if (inlineId) finishInline(); if (ideaInline) finishIdeaInline(true); getSelection().removeAllRanges(); hideIdeaFab(); }
+  $("#selModeBtn").setAttribute("aria-pressed", String(on));
+  $("#selModeBtn span").textContent = on ? "완료" : "선택";
+  applySel();
+}
 const cardSel = () => view === "ideas" ? "#list .idea[data-iid]:not(.inline)" : "#list .memo[data-id]:not(.inline):not(.editing)";
 const cardId = (c) => c.dataset.iid || c.dataset.id;
 const cards = () => [...document.querySelectorAll(cardSel())];
@@ -1719,26 +1729,28 @@ function applySel() {
   const all = cards(), ids = new Set(all.map(cardId));
   selIds.forEach((id) => { if (!ids.has(id)) selIds.delete(id); });
   all.forEach((c) => c.classList.toggle("sel", selIds.has(cardId(c))));
+  $("#list").classList.toggle("sel-mode", selMode);
   renderSelBar();
 }
 function setSel(ids, anchor) { selIds = new Set(ids); if (anchor !== undefined) selAnchor = anchor; selConfirm = false; applySel(); }
-function clearSel() { if (!selIds.size && !selConfirm) return; selIds.clear(); selAnchor = null; selConfirm = false; applySel(); }
+function clearSel() { if (selMode) { setSelMode(false); return; } if (!selIds.size && !selConfirm) return; selIds.clear(); selAnchor = null; selConfirm = false; applySel(); }
 const selBar = document.createElement("div");
 selBar.className = "sel-bar"; selBar.hidden = true; selBar.setAttribute("role", "toolbar"); selBar.setAttribute("aria-label", "선택한 카드");
 document.body.appendChild(selBar);
 function renderSelBar() {
-  const n = selIds.size; selBar.hidden = !n;
-  if (!n) { selConfirm = false; return; }
+  const n = selIds.size; selBar.hidden = !n && !selMode;
+  if (!n) selConfirm = false;
+  if (selBar.hidden) return;
   const what = view === "ideas" ? "소재" : view === "kakao" ? "카톡정리" : "메모";
   selBar.classList.toggle("confirm", selConfirm);
   selBar.innerHTML = selConfirm
     ? `<span class="sel-n"><b>${what} ${n}개</b>를 삭제할까요?</span><button type="button" class="sel-del" data-sel="yes">삭제</button><button type="button" data-sel="no">취소</button>`
-    : `<span class="sel-n"><b>${n}개</b> 선택</span><button type="button" class="sel-del" data-sel="del">삭제</button><button type="button" data-sel="all">모두 선택</button><button type="button" data-sel="clear">선택 해제</button>`;
+    : `<span class="sel-n"><b>${n}개</b> 선택</span><button type="button" class="sel-del" data-sel="del"${n ? "" : " disabled"}>삭제</button><button type="button" data-sel="all">모두 선택</button><button type="button" data-sel="clear">${selMode ? "완료" : "선택 해제"}</button>`;
 }
 selBar.addEventListener("click", (e) => {
   const b = e.target.closest("[data-sel]"); if (!b) return;
   const a = b.dataset.sel;
-  if (a === "del") { selConfirm = true; renderSelBar(); selBar.querySelector('[data-sel="yes"]').focus(); }
+  if (a === "del") { if (!selIds.size) return; selConfirm = true; renderSelBar(); selBar.querySelector('[data-sel="yes"]').focus(); }
   else if (a === "no") { selConfirm = false; renderSelBar(); }
   else if (a === "yes") deleteSelected();
   else if (a === "all") setSel(cards().map(cardId));
@@ -1747,6 +1759,7 @@ selBar.addEventListener("click", (e) => {
 function deleteSelected() {
   const ids = [...selIds]; if (!ids.length) return;
   selIds.clear(); selAnchor = null; selConfirm = false;
+  if (selMode) setSelMode(false);
   if (view === "ideas") {
     const gone = ideas.filter((x) => ids.includes(x.id));
     ideas = ideas.filter((x) => !ids.includes(x.id)); saveIdeas();
@@ -1774,8 +1787,15 @@ document.addEventListener("mousedown", (e) => {
 document.addEventListener("click", (e) => {
   if (view !== "memo" && view !== "kakao" && view !== "ideas") return;
   if (rubberJustEnded) { rubberJustEnded = false; e.stopPropagation(); e.preventDefault(); return; }
-  if (e.target.closest(".sel-bar, .toast, dialog, .idea-fab")) return;
+  if (e.target.closest(".sel-bar, .toast, dialog, .idea-fab, #selModeBtn")) return;
   const c = cardOf(e.target);
+  if (selMode) {
+    if (!c) return;
+    const id = cardId(c), n = new Set(selIds);
+    if (e.shiftKey && selAnchor) { const all = cards().map(cardId), a = all.indexOf(selAnchor), b = all.indexOf(id); all.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => n.add(x)); }
+    else n.has(id) ? n.delete(id) : n.add(id);
+    setSel(n, id); e.stopPropagation(); e.preventDefault(); return;
+  }
   if (!c || c.classList.contains("inline") || c.classList.contains("editing")) {
     // 카드 바깥 빈 곳을 누르면 선택 해제
     if (!c && selIds.size && !e.target.closest(INTERACTIVE + ", header, #composer, .tag-bar")) clearSel();
@@ -1799,7 +1819,7 @@ document.addEventListener("click", (e) => {
   e.stopPropagation(); e.preventDefault();
 }, true);
 document.addEventListener("keydown", (e) => {
-  if (!selIds.size) return;
+  if (!selIds.size && !selMode) return;
   const typing = e.target.closest && e.target.closest("input, textarea, [contenteditable='true']");
   if (typing) return;
   if (e.key === "Escape") { e.preventDefault(); if (selConfirm) { selConfirm = false; renderSelBar(); } else clearSel(); }
@@ -1816,7 +1836,7 @@ document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (cardOf(t) || t.closest(INTERACTIVE + ", header, #composer, .tag-bar, .sel-bar, .toast, dialog, .notice, .idea-fab, .to-top")) return;
     if (e.clientX >= document.documentElement.clientWidth) return;   // 스크롤 막대
-    rb = { x: e.clientX, y: e.clientY + scrollY, add: e.ctrlKey || e.metaKey || e.shiftKey, base: new Set(selIds), moved: false, cx: e.clientX, cy: e.clientY };
+    rb = { x: e.clientX, y: e.clientY + scrollY, add: selMode || e.ctrlKey || e.metaKey || e.shiftKey, base: new Set(selIds), moved: false, cx: e.clientX, cy: e.clientY };
   });
   const update = () => {
     if (!rb) return;
