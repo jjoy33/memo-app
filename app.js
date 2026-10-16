@@ -1054,9 +1054,10 @@ function markIdeas() {
 }
 
 /* ---------------- 아주 긴 메모 접기 ---------------- */
-// 본문이 LONG_PX보다 길면 윗부분(CLIP_PX)만 보이게 접어 둡니다. 펼친 메모는 이 기기에 기억합니다.
+// 본문이 LONG_PX보다 길면 윗부분(CLIP_PX)만 보이게 접어 둡니다. 펼친 상태는 앱을 다시 열면 접힙니다.
 const LONG_PX = 560, CLIP_PX = 220;
-let openLong = new Set(lsGet("memo-open-long", []));
+let openLong = new Set();   // 펼친 상태는 지금 창에서만 유지 — 앱을 다시 열면 모두 접힘
+lsSet("memo-open-long", []);
 function applyClips() {
   document.querySelectorAll("#list .memo:not(.inline):not(.editing)").forEach((art) => {
     const b = art.querySelector(".m-body.editable"); if (!b) return;
@@ -1074,7 +1075,6 @@ function applyClips() {
 function toggleClip(art) {
   const id = art.dataset.id, opening = !openLong.has(id);
   opening ? openLong.add(id) : openLong.delete(id);
-  lsSet("memo-open-long", [...openLong]);
   applyClips();
   if (!opening && art.getBoundingClientRect().top < 0) art.scrollIntoView({ block: "start", behavior: "smooth" });
 }
@@ -1381,9 +1381,10 @@ function renderIdeas() {
     : `<p class="idea-sum"><button type="button" class="sum-link" data-onlynew="on" title="안 쓴 소재만 보기">쓸 소재 <b>${activeN}</b></button> · 다 쓴 소재 ${list.length - activeN}</p>`) + list.map(ideaHTML).join("");
   applyIdeaClips();
 }
-// 긴 소재는 윗부분만 보이게 접기 (펼친 소재는 이 기기에 기억)
+// 긴 소재는 윗부분만 보이게 접기 (다시 열면 접힘)
 const IDEA_LONG = 210, IDEA_CLIP = 130;
-let openIdeas = new Set(lsGet("memo-open-ideas", []));
+let openIdeas = new Set();   // 소재도 다시 열면 접힘
+lsSet("memo-open-ideas", []);
 function applyIdeaClips() {
   document.querySelectorAll("#list .idea").forEach((card) => {
     const t = card.querySelector(".idea-text"); if (!t) return;
@@ -1400,7 +1401,6 @@ function applyIdeaClips() {
 function toggleIdeaClip(card) {
   const id = card.dataset.iid, opening = !openIdeas.has(id);
   opening ? openIdeas.add(id) : openIdeas.delete(id);
-  lsSet("memo-open-ideas", [...openIdeas]);
   applyIdeaClips();
   if (!opening && card.getBoundingClientRect().top < 0) card.scrollIntoView({ block: "start", behavior: "smooth" });
 }
