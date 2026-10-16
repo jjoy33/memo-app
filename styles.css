@@ -425,3 +425,13 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 .empty .only-new-off{display:block;margin:10px auto 0}
 .sum-link{border:0;background:none;padding:0;font:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
 .sum-link:hover{color:var(--accent)}
+
+/* 카톡정리 읽음 표시 */
+.read-row{margin-top:8px}
+.read-btn{display:inline-flex;align-items:center;gap:5px;border:1.5px solid var(--accent);background:var(--surface);color:var(--accent);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700}
+.read-btn svg{width:14px;height:14px}
+.read-btn[aria-pressed="true"]{border-color:var(--line);background:var(--bg);color:var(--muted);font-weight:600}
+.memo.unread{border-left:4px solid var(--accent)}
+.memo.read{background:color-mix(in srgb,var(--surface) 80%,var(--bg))}
+.memo.read .m-title{color:var(--muted)}
+.sel-bar .sel-draft{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}

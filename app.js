@@ -957,12 +957,13 @@ function memoHTML(m) {
     : `${m.title ? `<h3 class="m-title editable">${tagText(m.title)}</h3>` : ""}
        <div class="m-body rich editable" data-ph="${m.title || (m.attachments || []).length ? "눌러서 내용 추가" : ""}">${viewHTML(m)}</div>
        ${(m.tags || []).length ? `<div class="tags">${m.tags.map((t) => `<button type="button" class="tag-chip view" data-act="tag" data-tag="${esc(t)}" title="#${esc(t)} 메모만 보기">#${hl(t)}</button>`).join("")}</div>` : ""}`;
-  return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${m._local ? " unsynced" : ""}${inline ? " inline" : ""}" data-id="${m.id}">
+  return `<article class="memo${m.pinned ? " pinned" : ""}${m.todo && m.done ? " done" : ""}${isKakao(m) && !m.todo ? (isRead(m) ? " read" : " unread") : ""}${m._local ? " unsynced" : ""}${inline ? " inline" : ""}" data-id="${m.id}">
     ${checkbox}
     <div class="m-main">
       ${text}
       ${attsHTML(m)}
       ${metaHTML(m)}
+      ${isKakao(m) && !m.todo ? `<div class="read-row"><button type="button" class="read-btn" data-act="read" aria-pressed="${isRead(m)}">${isRead(m) ? ICON.check + "읽음" : "읽음으로 표시"}</button></div>` : ""}
       ${histHTML(m)}
       ${confirmId === m.id ? `<div class="confirm"><span>이 메모${(m.attachments || []).length ? "와 첨부파일" : ""}을 삭제할까요?</span>
         <button type="button" class="btn danger" data-act="del-yes">삭제</button>
@@ -983,6 +984,8 @@ function matches(m, q) {
     (m.attachments || []).some((a) => (a.name || "").toLowerCase().includes(q));
 }
 const KAKAO = "카톡정리";
+// 카톡정리 '읽음' 표시는 기존 done 칸을 씁니다 (카톡정리 메모는 할 일이 아니어서 비어 있는 칸). 기기 간 동기화됩니다.
+const isRead = (m) => !!m.done;
 const isKakao = (m) => memoTags(m).some((t) => t.toLowerCase() === KAKAO);
 const viewMemos = () => memos.filter((m) => (view === "kakao") === isKakao(m));   // 메모 탭과 카톡정리 탭을 나눔
 const hasFile = (m) => (m.attachments || []).some((a) => !a.inline);
@@ -999,7 +1002,7 @@ function render() {
   const el = $("#list");
   if (!pool.length) el.innerHTML = kk ? '<div class="empty"><strong>아직 카톡정리가 없습니다</strong>매일 아침 단톡방 정리 결과가 여기에 쌓입니다. #카톡정리 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
     : '<div class="empty"><strong>아직 메모가 없습니다</strong>위 입력창에 적거나 이미지·파일을 붙여넣으면 날짜와 시간이 함께 기록됩니다.</div>';
-  else if (!list.length && onlyNew) el.innerHTML = `<div class="empty"><strong>최근 24시간에 들어온 카톡정리가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">전체 보기</button></div>`;
+  else if (!list.length && onlyNew) el.innerHTML = `<div class="empty"><strong>안 읽은 카톡정리가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">전체 보기</button></div>`;
   else if (!list.length) el.innerHTML = `<div class="empty"><strong>${fileOnly ? "조건에 맞는 메모가 없습니다" : "검색 결과가 없습니다"}</strong>${fileOnly ? "위의 '📎 파일 있는 메모'를 다시 누르면 모든 메모가 보입니다." : "다른 단어로 찾아보세요."}</div>`;
   else {
     const pinned = list.filter((m) => m.pinned), rest = list.filter((m) => !m.pinned);
@@ -1008,7 +1011,7 @@ function render() {
     const groups = new Map();
     rest.forEach((m) => { const k = dayKey(ms(m.created_at)); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
     groups.forEach((arr, k) => { html += `<section class="group"><div class="group-h">${dayLabel(k)}<span class="n">${arr.length}</span></div>${arr.map(memoHTML).join("")}</section>`; });
-    el.innerHTML = (onlyNew ? `<p class="only-new"><span>최근 24시간에 들어온 카톡정리 <b>${list.length}</b>개만 보는 중</span><button type="button" class="only-new-off" data-onlynew="off">전체 보기 ✕</button></p>` : "") + html;
+    el.innerHTML = (onlyNew ? `<p class="only-new"><span>안 읽은 카톡정리 <b>${list.length}</b>개만 보는 중</span><button type="button" class="only-new-off" data-onlynew="off">전체 보기 ✕</button></p>` : "") + html;
   }
   renderTagBar();
   ensureUrls(list);
@@ -1226,6 +1229,11 @@ $("#list").addEventListener("click", async (e) => {
   }
   if (act === "view") { const a = m.attachments[+btn.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
   if (act === "done") { saveMemo(m, { done: !m.done }); return render(); }
+  if (act === "read") {
+    const now = !m.done; saveMemo(m, { done: now }); render();
+    toast(now ? "읽음으로 표시했습니다" : "안 읽음으로 되돌렸습니다", now ? "되돌리기" : undefined, now ? () => { saveMemo(m, { done: false }); render(); } : undefined);
+    return;
+  }
   if (act === "pin") { saveMemo(m, { pinned: !m.pinned }); return render(); }
   if (act === "del") { confirmId = id; return render(); }
   if (act === "del-no") { confirmId = null; return render(); }
@@ -1280,7 +1288,7 @@ $("#list").addEventListener("click", async (e) => {
     const changedNow = d.todo !== !!m.todo || removedPaths.length || added.length;
     endEdit();
     if (!changedNow) return;
-    saveMemo(m, { todo: d.todo, done: d.todo ? !!m.done : false, attachments, updated_at: new Date().toISOString() });
+    saveMemo(m, { todo: d.todo, done: d.todo || isKakao(m) ? !!m.done : false, attachments, updated_at: new Date().toISOString() });
     render();
     if (removedPaths.length && navigator.onLine) sb.storage.from(BUCKET).remove(removedPaths);
   }
@@ -1326,9 +1334,9 @@ function syncViewChrome() {
   $("#ideaCount").textContent = ideas.length ? String(active) : "";
   $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : "메모·파일 이름 검색 (#태그)";
 }
-// 숫자 배지를 누르면 '아직 안 본 것'만: 소재함 = 아직 안 쓴 소재, 카톡정리 = 최근 24시간에 들어온 정리
+// 숫자 배지를 누르면 '아직 안 본 것'만: 소재함 = 아직 안 쓴 소재, 카톡정리 = 아직 읽음 표시 안 한 정리
 var ideaOnlyNew = false, kakaoOnlyNew = false;
-const isFreshKakao = (m) => Date.now() - ms(m.created_at) < 24 * 3600 * 1000;
+const isFreshKakao = (m) => !isRead(m);   // 아직 읽음 표시를 안 한 카톡정리
 function setView(v, keepFilter) {
   if (!keepFilter) { ideaOnlyNew = false; kakaoOnlyNew = false; }
   if (view === v) { render(); return; }
@@ -1339,7 +1347,7 @@ function setView(v, keepFilter) {
 }
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabIdeas").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { ideaOnlyNew = true; ideaBox = ""; setView("ideas", true); toast("아직 안 쓴 소재만 보여 줍니다"); } else setView("ideas"); });
-$("#tabKakao").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { kakaoOnlyNew = true; setView("kakao", true); toast("최근 24시간에 들어온 정리만 보여 줍니다"); } else setView("kakao"); });
+$("#tabKakao").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { kakaoOnlyNew = true; setView("kakao", true); toast("안 읽은 정리만 보여 줍니다"); } else setView("kakao"); });
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-onlynew]"); if (!b) return;
   const on = b.dataset.onlynew === "on";
@@ -1784,7 +1792,7 @@ function renderSelBar() {
   selBar.classList.toggle("confirm", selConfirm);
   selBar.innerHTML = selConfirm
     ? `<span class="sel-n"><b>${what} ${n}개</b>를 삭제할까요?</span><button type="button" class="sel-del" data-sel="yes">삭제</button><button type="button" data-sel="no">취소</button>`
-    : `<span class="sel-n"><b>${n}개</b> 선택</span><button type="button" class="sel-del" data-sel="del"${n ? "" : " disabled"}>삭제</button><button type="button" data-sel="all">모두 선택</button><button type="button" data-sel="clear">${selMode ? "완료" : "선택 해제"}</button>`;
+    : `<span class="sel-n"><b>${n}개</b> 선택</span>${view === "ideas" ? `<button type="button" class="sel-draft" data-sel="draft"${n ? "" : " disabled"}>초안 만들기</button>` : ""}<button type="button" class="sel-del" data-sel="del"${n ? "" : " disabled"}>삭제</button><button type="button" data-sel="all">모두 선택</button><button type="button" data-sel="clear">${selMode ? "완료" : "선택 해제"}</button>`;
 }
 selBar.addEventListener("click", (e) => {
   const b = e.target.closest("[data-sel]"); if (!b) return;
@@ -1792,9 +1800,41 @@ selBar.addEventListener("click", (e) => {
   if (a === "del") { if (!selIds.size) return; selConfirm = true; renderSelBar(); selBar.querySelector('[data-sel="yes"]').focus(); }
   else if (a === "no") { selConfirm = false; renderSelBar(); }
   else if (a === "yes") deleteSelected();
+  else if (a === "draft") makeDraft();
   else if (a === "all") setSel(cards().map(cardId));
   else if (a === "clear") clearSel();
 });
+// 고른 소재들을 새 메모 하나로 합칩니다 (화면에 보이는 순서대로, 원문 정보와 함께)
+function makeDraft() {
+  const order = cards().map(cardId), picked = order.filter((id) => selIds.has(id)).map((id) => ideas.find((x) => x.id === id)).filter(Boolean);
+  if (!picked.length) return;
+  const now = new Date().toISOString(), id = newId();
+  const srcOf = (x) => {
+    const m = x.memo_id && memos.find((mm) => mm.id === x.memo_id); if (!m) return "";
+    const head = (m.title || (m.body || "").split("\n")[0] || "").trim().slice(0, 40);
+    return "원문: " + head + (head ? " · " : "") + dateStr(ms(m.created_at));
+  };
+  const parts = picked.map((x, i) => {
+    const lines = [(i + 1) + ". " + x.text.trim()];
+    if (x.note) lines.push("   ↳ " + x.note.trim());
+    const src = srcOf(x); lines.push("   (" + x.box + (src ? " · " + src : "") + ")");
+    return lines.join("\n");
+  });
+  const body = "소재 " + picked.length + "개를 모았습니다. 아래 소재를 엮어 글을 써 보세요.\n\n" + parts.join("\n\n");
+  const d = new Date();
+  const title = "초안 · 소재 " + picked.length + "개 (" + (d.getMonth() + 1) + "/" + d.getDate() + ")";
+  const row = { id, user_id: uid, title, body, html: plainToHtml(body), tags: ["초안"], todo: false, done: false, pinned: false, attachments: [], history: [], created_at: now, updated_at: now };
+  memos.unshift({ ...row, _local: true }); saveCache();
+  queue({ op: "upsert", row, isNew: true });
+  setSelMode(false); selIds.clear();
+  setView("memo");
+  const art = document.querySelector('.memo[data-id="' + id + '"]');
+  if (art) { art.scrollIntoView({ behavior: "smooth", block: "center" }); art.classList.add("flash"); setTimeout(() => art.classList.remove("flash"), 1800); }
+  toast("소재 " + picked.length + "개로 초안 메모를 만들었습니다", "소재를 다 씀으로", () => {
+    const t = new Date().toISOString(); picked.forEach((x) => { if (!x.used) saveIdea(x, { used: true, updated_at: t }); });
+    render(); toast("소재 " + picked.length + "개를 다 쓴 것으로 표시했습니다");
+  }, 9000);
+}
 function deleteSelected() {
   const ids = [...selIds]; if (!ids.length) return;
   selIds.clear(); selAnchor = null; selConfirm = false;
