@@ -411,3 +411,17 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 #list.sel-mode .memo::before,#list.sel-mode .idea::before{animation:selPop .18s ease-out}
 @keyframes selPop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){#list.sel-mode .memo::before,#list.sel-mode .idea::before{animation:none}}
+
+/* 숫자 배지를 눌러 '아직 안 본 것'만 보기 */
+.view-n{cursor:pointer;transition:transform .12s}
+.view-n:hover{transform:scale(1.12);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
+.tag-filter .n-new{font-family:var(--mono);font-size:11px;font-weight:700;min-width:18px;padding:0 5px;border-radius:999px;background:var(--accent-soft);color:var(--accent);text-align:center;cursor:pointer}
+.tag-filter .n-new:hover{background:var(--accent);color:var(--accent-ink)}
+.tag-filter .n-new.zero{background:none;color:var(--muted);font-weight:400;cursor:inherit}
+.tag-filter.on .n-new:not(.zero){background:var(--accent-ink);color:var(--accent)}
+.tag-filter.on .n-new.zero{color:inherit;opacity:.8}
+.only-new{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 2px 10px;font-size:13px;color:var(--fg)}
+.only-new-off{border:1px solid var(--accent);background:var(--accent-soft);color:var(--fg);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+.empty .only-new-off{display:block;margin:10px auto 0}
+.sum-link{border:0;background:none;padding:0;font:inherit;color:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
+.sum-link:hover{color:var(--accent)}

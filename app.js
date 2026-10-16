@@ -991,13 +991,15 @@ function render() {
   syncViewChrome();
   if (view === "ideas") { renderIdeas(); applySel(); return; }
   const pool = viewMemos(), kk = view === "kakao";
-  const q = query.toLowerCase(), list = pool.filter((m) => matches(m, q) && (!fileOnly || hasFile(m)));
-  $("#count").textContent = q || fileOnly ? list.length + "/" + pool.length : pool.length ? pool.length + "개" : "";
+  const onlyNew = kk && kakaoOnlyNew;
+  const q = query.toLowerCase(), list = pool.filter((m) => matches(m, q) && (!fileOnly || hasFile(m)) && (!onlyNew || isFreshKakao(m)));
+  $("#count").textContent = q || fileOnly || onlyNew ? list.length + "/" + pool.length : pool.length ? pool.length + "개" : "";
   const used = memos.reduce((s, m) => s + (m.attachments || []).reduce((t, a) => t + (a.size || 0), 0), 0);
   $("#accUsage").textContent = "첨부 " + fmtSize(used) + " / " + fmtSize(STORAGE_CAP);
   const el = $("#list");
   if (!pool.length) el.innerHTML = kk ? '<div class="empty"><strong>아직 카톡정리가 없습니다</strong>매일 아침 단톡방 정리 결과가 여기에 쌓입니다. #카톡정리 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
     : '<div class="empty"><strong>아직 메모가 없습니다</strong>위 입력창에 적거나 이미지·파일을 붙여넣으면 날짜와 시간이 함께 기록됩니다.</div>';
+  else if (!list.length && onlyNew) el.innerHTML = `<div class="empty"><strong>최근 24시간에 들어온 카톡정리가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">전체 보기</button></div>`;
   else if (!list.length) el.innerHTML = `<div class="empty"><strong>${fileOnly ? "조건에 맞는 메모가 없습니다" : "검색 결과가 없습니다"}</strong>${fileOnly ? "위의 '📎 파일 있는 메모'를 다시 누르면 모든 메모가 보입니다." : "다른 단어로 찾아보세요."}</div>`;
   else {
     const pinned = list.filter((m) => m.pinned), rest = list.filter((m) => !m.pinned);
@@ -1006,7 +1008,7 @@ function render() {
     const groups = new Map();
     rest.forEach((m) => { const k = dayKey(ms(m.created_at)); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
     groups.forEach((arr, k) => { html += `<section class="group"><div class="group-h">${dayLabel(k)}<span class="n">${arr.length}</span></div>${arr.map(memoHTML).join("")}</section>`; });
-    el.innerHTML = html;
+    el.innerHTML = (onlyNew ? `<p class="only-new"><span>최근 24시간에 들어온 카톡정리 <b>${list.length}</b>개만 보는 중</span><button type="button" class="only-new-off" data-onlynew="off">전체 보기 ✕</button></p>` : "") + html;
   }
   renderTagBar();
   ensureUrls(list);
@@ -1317,23 +1319,33 @@ function syncViewChrome() {
   $("#tagBar").classList.toggle("off-view", ideasView);
   $("#ideaBar").hidden = !ideasView;
   [["#tabMemo", "memo"], ["#tabIdeas", "ideas"], ["#tabKakao", "kakao"]].forEach(([sel, v]) => { $(sel).classList.toggle("on", view === v); $(sel).setAttribute("aria-selected", view === v); });
-  const fresh = memos.filter((m) => isKakao(m) && Date.now() - ms(m.created_at) < 24 * 3600 * 1000).length;
+  const fresh = memos.filter((m) => isKakao(m) && isFreshKakao(m)).length;
   $("#kakaoCount").textContent = fresh ? String(fresh) : "";
   $("#cBody").dataset.ph = view === "kakao" ? "카톡정리 결과를 붙여넣으세요" : "적거나, 이미지·파일을 붙여넣으세요";
   const active = ideas.filter((x) => !x.used).length;
   $("#ideaCount").textContent = ideas.length ? String(active) : "";
   $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : "메모·파일 이름 검색 (#태그)";
 }
-function setView(v) {
-  if (view === v) return;
+// 숫자 배지를 누르면 '아직 안 본 것'만: 소재함 = 아직 안 쓴 소재, 카톡정리 = 최근 24시간에 들어온 정리
+var ideaOnlyNew = false, kakaoOnlyNew = false;
+const isFreshKakao = (m) => Date.now() - ms(m.created_at) < 24 * 3600 * 1000;
+function setView(v, keepFilter) {
+  if (!keepFilter) { ideaOnlyNew = false; kakaoOnlyNew = false; }
+  if (view === v) { render(); return; }
   if (inlineId) finishInline();
   query = ""; $("#q").value = "";
   if (ideaInline) finishIdeaInline(true);
   view = v; fileOnly = false; hideIdeaFab(); window.scrollTo({ top: 0 }); render();
 }
 $("#tabMemo").addEventListener("click", () => setView("memo"));
-$("#tabIdeas").addEventListener("click", () => setView("ideas"));
-$("#tabKakao").addEventListener("click", () => setView("kakao"));
+$("#tabIdeas").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { ideaOnlyNew = true; ideaBox = ""; setView("ideas", true); toast("아직 안 쓴 소재만 보여 줍니다"); } else setView("ideas"); });
+$("#tabKakao").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { kakaoOnlyNew = true; setView("kakao", true); toast("최근 24시간에 들어온 정리만 보여 줍니다"); } else setView("kakao"); });
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-onlynew]"); if (!b) return;
+  const on = b.dataset.onlynew === "on";
+  if (view === "ideas") ideaOnlyNew = on; else kakaoOnlyNew = on;
+  render();
+});
 ["#tabMemo", "#tabIdeas", "#tabKakao"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
@@ -1341,14 +1353,18 @@ function renderIdeas() {
   const q = query.replace(/^#/, "").toLowerCase();
   const boxes = allBoxes();
   if (ideaBox && !boxes.includes(ideaBox)) ideaBox = "";
-  const counts = new Map(); ideas.forEach((x) => counts.set(x.box, (counts.get(x.box) || 0) + 1));
+  const counts = new Map(), totals = new Map();
+  ideas.forEach((x) => { totals.set(x.box, (totals.get(x.box) || 0) + 1); if (!x.used) counts.set(x.box, (counts.get(x.box) || 0) + 1); });
+  const allNew = ideas.filter((x) => !x.used).length;
+  const nBadge = (n, t, box) => `<span class="n-new${n ? "" : " zero"}" data-newbox="${esc(box)}" title="아직 안 쓴 소재 ${n}개 / 전체 ${t}개${n ? " · 누르면 안 쓴 것만" : ""}">${n}</span>`;
   $("#ideaBar").innerHTML =
     `<button type="button" class="tag-filter add strong" data-ideact="write">+ 소재 쓰기</button>` +
-    `<button type="button" class="tag-filter${!ideaBox ? " on" : ""}" data-box="">전체<span>${ideas.length}</span></button>` +
-    boxes.map((b) => `<button type="button" class="tag-filter${ideaBox === b ? " on" : ""}" data-box="${esc(b)}">${esc(b)}<span>${counts.get(b) || 0}</span></button>`).join("") +
+    `<button type="button" class="tag-filter${!ideaBox ? " on" : ""}" data-box="">전체${nBadge(allNew, ideas.length, "")}</button>` +
+    boxes.map((b) => `<button type="button" class="tag-filter${ideaBox === b ? " on" : ""}" data-box="${esc(b)}">${esc(b)}${nBadge(counts.get(b) || 0, totals.get(b) || 0, b)}</button>`).join("") +
     `<button type="button" class="tag-filter add" data-ideact="newbox">+ 새 함</button>`;
   const list = ideas
     .filter((x) => !ideaBox || x.box === ideaBox)
+    .filter((x) => !ideaOnlyNew || !x.used)
     .filter((x) => !q || (x.text || "").toLowerCase().includes(q) || (x.note || "").toLowerCase().includes(q) || (x.box || "").toLowerCase().includes(q))
     .sort((a, b) => (a.used === b.used ? ms(b.created_at) - ms(a.created_at) : a.used ? 1 : -1));
   $("#count").textContent = q ? list.length + "/" + ideas.length : ideas.length ? ideas.length + "개" : "";
@@ -1357,9 +1373,12 @@ function renderIdeas() {
     el.innerHTML = `<div class="empty"><strong>아직 모은 소재가 없습니다</strong>메모에서 마음에 드는 문장을 드래그하면 나오는 <b>소재로 보관</b> 버튼을 눌러보세요.<br>위의 <b>+ 소재 쓰기</b>로 바로 적어도 됩니다.</div>`;
     return;
   }
-  if (!list.length) { el.innerHTML = '<div class="empty"><strong>이 함에는 아직 소재가 없습니다</strong></div>'; return; }
+  if (!list.length) { el.innerHTML = ideaOnlyNew ? '<div class="empty"><strong>아직 안 쓴 소재가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">다 쓴 소재까지 보기</button></div>' : '<div class="empty"><strong>이 함에는 아직 소재가 없습니다</strong></div>'; return; }
   const activeN = list.filter((x) => !x.used).length;
-  el.innerHTML = `<p class="idea-sum">쓸 소재 <b>${activeN}</b> · 다 쓴 소재 ${list.length - activeN}</p>` + list.map(ideaHTML).join("");
+  const inBox = ideas.filter((x) => !ideaBox || x.box === ideaBox), usedN = inBox.filter((x) => x.used).length;
+  el.innerHTML = (ideaOnlyNew
+    ? `<p class="idea-sum only-new"><span>아직 안 쓴 소재 <b>${activeN}</b>개만 보는 중</span><button type="button" class="only-new-off" data-onlynew="off">다 쓴 소재 ${usedN}개도 보기 ✕</button></p>`
+    : `<p class="idea-sum"><button type="button" class="sum-link" data-onlynew="on" title="안 쓴 소재만 보기">쓸 소재 <b>${activeN}</b></button> · 다 쓴 소재 ${list.length - activeN}</p>`) + list.map(ideaHTML).join("");
   applyIdeaClips();
 }
 // 긴 소재는 윗부분만 보이게 접기 (펼친 소재는 이 기기에 기억)
@@ -1464,6 +1483,8 @@ $("#ideaBar").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.ideact === "newbox") { openIdeaDlg({ mode: "box" }); return; }
   if (b.dataset.ideact === "write") { openIdeaDlg({ mode: "new", text: "", memoId: null }); return; }
+  const nb = e.target.closest(".n-new");
+  ideaOnlyNew = !!(nb && !nb.classList.contains("zero"));   // 숫자를 누르면 그 함의 안 쓴 소재만, 이름을 누르면 전부
   ideaBox = b.dataset.box || ""; render();
 });
 $("#list").addEventListener("click", (e) => {
