@@ -999,6 +999,43 @@ function render() {
   renderTagBar();
   ensureUrls(list);
   applyClips();
+  markIdeas();
+}
+
+/* ---------------- 소재로 보관한 부분 색 표시 ---------------- */
+// 메모·카톡정리 글에서 소재로 보관한 문장에 색을 칠합니다. 글 자체(저장 내용)는 바꾸지 않고 화면에만 표시합니다.
+// 띄어쓰기·줄바꿈 차이는 무시하고 찾습니다. 소재 문장을 나중에 고쳤다면 원문과 달라져 표시되지 않을 수 있습니다.
+const HAS_HL = typeof CSS !== "undefined" && CSS.highlights && typeof Highlight === "function";
+function markIdeas() {
+  if (!HAS_HL) return;
+  const fresh = [], usedR = [];
+  const byMemo = new Map();
+  ideas.forEach((x) => { if (x.memo_id && x.text) { if (!byMemo.has(x.memo_id)) byMemo.set(x.memo_id, []); byMemo.get(x.memo_id).push(x); } });
+  if (byMemo.size) document.querySelectorAll("#list .memo[data-id]").forEach((art) => {
+    const list = byMemo.get(art.dataset.id); if (!list) return;
+    art.querySelectorAll(".m-title, .m-body").forEach((root) => {
+      // 글자 하나하나가 어느 글자 조각(노드)의 몇 번째인지 기억하며, 공백을 뺀 글을 만듭니다
+      const map = []; let flat = "";
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const v = n.nodeValue;
+        for (let i = 0; i < v.length; i++) if (!/\s/.test(v[i])) { flat += v[i]; map.push([n, i]); }
+      }
+      if (!flat) return;
+      list.forEach((x) => {
+        const needle = x.text.replace(/\s+/g, ""); if (!needle) return;
+        let at = flat.indexOf(needle);
+        while (at >= 0) {
+          const a = map[at], b = map[at + needle.length - 1], r = document.createRange();
+          r.setStart(a[0], a[1]); r.setEnd(b[0], b[1] + 1);
+          (x.used ? usedR : fresh).push(r);
+          at = flat.indexOf(needle, at + needle.length);
+        }
+      });
+    });
+  });
+  CSS.highlights.set("idea-clip", new Highlight(...fresh));
+  CSS.highlights.set("idea-clip-used", new Highlight(...usedR));
 }
 
 /* ---------------- 아주 긴 메모 접기 ---------------- */
