@@ -63,3 +63,7 @@ alter table public.memos add column if not exists html text not null default '';
 
 -- 8) 태그 (v4에서 추가)
 alter table public.memos add column if not exists tags jsonb not null default '[]'::jsonb;
+
+-- 9) 소재에도 서식·이미지·영상·표·파일 (v5.17에서 추가)
+alter table public.clips add column if not exists html text not null default '';
+alter table public.clips add column if not exists attachments jsonb not null default '[]'::jsonb;

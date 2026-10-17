@@ -435,3 +435,16 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 .memo.read{background:color-mix(in srgb,var(--surface) 80%,var(--bg))}
 .memo.read .m-title{color:var(--muted)}
 .sel-bar .sel-draft{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+/* 소재 카드: 메모처럼 서식·이미지·영상·표·파일 */
+.idea-ed-body{position:relative;outline:none;min-height:3.2em;font-size:16px;line-height:1.6;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface);overflow-wrap:anywhere}
+.idea-ed-body:focus{outline:2px solid var(--accent);outline-offset:0}
+.idea-ed-body.is-empty::before{left:10px;top:8px;font-weight:400}
+.idea-text.rich{font-size:16px}
+.idea:not(.inline) .idea-text img{cursor:zoom-in}
+.idea .atts{margin-top:2px}
+.idea.inline .tools{margin-top:0}
+/* 소재를 고치는 동안에는 글쓰기 칸을 넓게: 오른쪽 버튼은 아래 줄로 */
+.idea.inline{flex-wrap:wrap}
+.idea.inline .idea-main{flex-basis:100%}
+.idea.inline .idea-actions{flex-direction:row-reverse;align-items:center;justify-content:space-between;width:100%}
+.idea-ed-body{min-height:4.8em}

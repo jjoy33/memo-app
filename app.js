@@ -190,7 +190,11 @@ async function load(manual) {
       sb.from("clips").select("*").order("created_at", { ascending: false }).limit(5000),
       sb.from("clip_boxes").select("*").order("created_at", { ascending: true })
     ]);
-    if (!ir.error) ideas = applyOutbox(ir.data || [], "clips").filter((x) => !ideaDeletes.has(x.id));
+    if (!ir.error) {
+      // 이 기기에서 고치는 중인 소재와 아직 저장 전인 새 소재는 그대로 둡니다
+      const keep = ideas.filter((x) => x._blank || x.id === ideaInline);
+      ideas = applyOutbox(ir.data || [], "clips").filter((x) => !ideaDeletes.has(x.id) && !keep.some((k) => k.id === x.id)).concat(keep);
+    }
     if (!br.error) boxNames = (br.data || []).map((b) => b.name);
     saveIdeas();
     saveCache(); requestRender();
@@ -219,6 +223,7 @@ function subscribe() {
       else {
         const row = p.new; if (!row || row.user_id !== uid || ideaDeletes.has(row.id)) return;
         if (outbox.some((o) => o.table === "clips" && ((o.row && o.row.id === row.id) || o.id === row.id))) return;
+        if (row.id === ideaInline) return;   // 지금 이 기기에서 고치는 중
         ideas = ideas.filter((x) => x.id !== row.id); ideas.push(row);
       }
       saveIdeas(); requestRender();
@@ -441,8 +446,15 @@ function toolsHTML(withFile) {
       <button type="button" class="tbtn txt" data-t="tbl-del">표 삭제</button></span>
   </div>`;
 }
-const editorOf = (tools) => tools.closest("#composer") ? $("#cBody") : (tools.closest(".memo") || document).querySelector(".in-body");
-const toolsOf = (ed) => ed.id === "cBody" ? $("#cTools .tools") : ed.closest(".memo") && ed.closest(".memo").querySelector(".tools");
+const editorOf = (tools) => tools.closest("#composer") ? $("#cBody") : (tools.closest(".memo, .idea") || document).querySelector(".in-body, .idea-ed-body");
+const toolsOf = (ed) => ed.id === "cBody" ? $("#cTools .tools") : ed.closest(".memo, .idea") && ed.closest(".memo, .idea").querySelector(".tools");
+// 글쓰기 칸이 어디에 속했는지: 메모 카드 / 소재 카드
+function hostOf(ed) {
+  const ic = ed.closest(".idea");
+  if (ic) { const x = ideas.find((i) => i.id === ic.dataset.iid); return x ? { kind: "idea", id: x.id, obj: x } : null; }
+  const mc = ed.closest(".memo"); if (!mc) return null;
+  const m = memos.find((x) => x.id === mc.dataset.id); return m ? { kind: "memo", id: m.id, obj: m } : null;
+}
 function restoreRange(ed) {
   const sel = getSelection();
   if (document.activeElement !== ed) ed.focus({ preventScroll: true });
@@ -543,7 +555,9 @@ function insertFiles(files, ed) {
   }
   if (!media.length) return;
   if (!navigator.onLine) { toast("이미지·영상은 인터넷이 연결되어야 넣을 수 있습니다"); return; }
-  const memoId = ed.id === "cBody" ? draftId() : ed.closest(".memo").dataset.id;
+  const host = ed.id === "cBody" ? null : hostOf(ed);
+  if (ed.id !== "cBody" && !host) return;
+  const memoId = host ? host.id : draftId();
   restoreRange(ed);
   for (const f of media) {
     if (f.size > MAX_FILE) { toast((f.name || "파일") + "은 50MB를 넘어 넣을 수 없습니다. 긴 영상은 링크로 붙여주세요."); continue; }
@@ -554,6 +568,7 @@ function insertFiles(files, ed) {
     const p = uploadFiles(memoId, [{ file: f, name: nameFor(f) }]).then(([att]) => {
       att.inline = true;
       if (ed.id === "cBody") composerAtts.push(att);
+      else if (host.kind === "idea") { const x = ideas.find((i) => i.id === memoId); if (x) patchIdea(x, { attachments: (x.attachments || []).concat(att) }); }
       else { const m = memos.find((x) => x.id === memoId); if (m) m.attachments = (m.attachments || []).concat(att); }
       lsSet("memo-draft-atts", composerAtts);
       urlCache.set(att.path, { url, exp: Date.now() + 6 * 3600 * 1000 });
@@ -568,7 +583,9 @@ function insertFiles(files, ed) {
   syncSave();
 }
 async function attachToMemo(files, ed) {
-  const m = memos.find((x) => x.id === ed.closest(".memo").dataset.id); if (!m) return;
+  const host = hostOf(ed); if (!host) return;
+  if (host.kind === "idea") return attachToIdea(files, host.obj);
+  const m = host.obj;
   if (!navigator.onLine) { toast("파일 첨부는 인터넷 연결이 필요합니다."); return; }
   const items = files.filter((f) => f.size <= MAX_FILE).map((f) => ({ file: f, name: nameFor(f) }));
   if (items.length < files.length) toast("50MB를 넘는 파일은 빼고 첨부합니다.");
@@ -823,31 +840,28 @@ form.addEventListener("submit", async (e) => {
   if (cIdea) {
     const tagLine = cTags.length ? cTags.map((t) => "#" + t).join(" ") : "";
     const text = [title, body, tagLine].filter(Boolean).join("\n").trim();
-    const hasFiles = attachments.length > 0;
-    if (!text && !hasFiles) { toast("소재로 보관할 글을 적어주세요"); return; }
-    if (text) {
-      cIdeaBoxes.forEach((bx) => {
-        const x = { id: newId(), user_id: uid, memo_id: hasFiles ? id : null, box: bx, text, note: "", used: false, created_at: now, updated_at: now };
-        ideas.unshift(x); saveIdea(x, {});
-      });
-      lsSet("memo-last-box", cIdeaBoxes[0]); lsSet("memo-last-boxes", cIdeaBoxes);
-    }
-    if (!hasFiles) {   // 글만 있으면 소재함에만 보관
-      const bs = cIdeaBoxes.slice();
-      resetComposer(); render();
-      toast(`${boxLabel(bs)}에 소재로 보관했습니다`, "소재함 보기", () => { ideaBox = bs[0]; setView("ideas"); });
-      if (fine) cBody.focus();
-      return;
-    }
+    if (!text && !attachments.length) { toast("소재로 보관할 글을 적어주세요"); return; }
+    // 서식·이미지·영상·표·파일도 소재에 그대로 담습니다 (메모를 따로 만들지 않음)
+    const plain = !cBody.querySelector("img, video, table, hr, span[class], b, strong, ul, ol");
+    const ihtml = plain ? "" : (title ? "<p><b>" + esc(title) + "</b></p>" : "") + html + (tagLine ? "<p>" + esc(tagLine) + "</p>" : "");
+    cIdeaBoxes.forEach((bx) => {
+      const x = { id: newId(), user_id: uid, memo_id: null, box: bx, text, note: "", html: ihtml, attachments: attachments.slice(), used: false, created_at: now, updated_at: now };
+      ideas.unshift(x); saveIdea(x, {});
+    });
+    lsSet("memo-last-box", cIdeaBoxes[0]); lsSet("memo-last-boxes", cIdeaBoxes);
+    const bs = cIdeaBoxes.slice();
+    resetComposer(); render();
+    toast(`${boxLabel(bs)}에 소재로 보관했습니다`, "소재함 보기", () => { ideaBox = bs[0]; setView("ideas"); });
+    if (fine) cBody.focus();
+    return;
   }
   if (view === "kakao" && !cTags.some((t) => t.toLowerCase() === KAKAO)) cTags.push(KAKAO);
   const row = { id, user_id: uid, title, body, html, todo: cTodo, done: false, pinned: cPin, attachments, tags: cTags.slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
-  const wasIdea = cIdea, bsNow = cIdeaBoxes.slice();
   resetComposer();
   const toK = view !== "kakao" && isKakao(row);
-  render(); toast(wasIdea ? `사진·파일은 메모로, 글은 ${boxLabel(bsNow)}에도 보관했습니다` : toK ? "#카톡정리 태그가 있어 카톡정리 탭에 저장했습니다" : "저장했습니다 · " + timeStr(Date.now()),
+  render(); toast(toK ? "#카톡정리 태그가 있어 카톡정리 탭에 저장했습니다" : "저장했습니다 · " + timeStr(Date.now()),
     toK ? "보기" : undefined, toK ? () => setView("kakao") : undefined);
   if (fine) cBody.focus();
 });
@@ -1082,7 +1096,7 @@ function toggleClip(art) {
   if (!opening && art.getBoundingClientRect().top < 0) art.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 let clipTimer = null;
-const clipSoon = () => { clearTimeout(clipTimer); clipTimer = setTimeout(applyClips, 120); };
+const clipSoon = () => { clearTimeout(clipTimer); clipTimer = setTimeout(() => { if (view === "ideas") applyIdeaClips(); else applyClips(); }, 120); };
 $("#list").addEventListener("load", (e) => { if (e.target.tagName === "IMG") clipSoon(); }, true);   // 이미지가 늦게 뜨면 길이 다시 재기
 window.addEventListener("resize", clipSoon);
 
@@ -1188,12 +1202,17 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 function commitDelete(id) {
   const p = pendingDeletes.get(id); if (!p) return;
   clearTimeout(p.timer); pendingDeletes.delete(id);
-  queue({ op: "delete", id, paths: (p.memo.attachments || []).map((a) => a.path) });
+  // 소재나 다른 메모가 같은 사진·파일을 쓰고 있으면 그 파일은 남겨 둡니다
+  const used = new Set();
+  ideas.forEach((x) => (x.attachments || []).forEach((a) => used.add(a.path)));
+  memos.forEach((m) => { if (m.id !== id) (m.attachments || []).forEach((a) => used.add(a.path)); });
+  queue({ op: "delete", id, paths: (p.memo.attachments || []).map((a) => a.path).filter((pp) => !used.has(pp)) });
 }
 function flushDeletes() { [...pendingDeletes.keys()].forEach(commitDelete); }
 
 /* ---------------- 목록 동작 ---------------- */
 $("#list").addEventListener("click", async (e) => {
+  if (view === "ideas") return;   // 소재 카드는 아래 소재함 처리에서
   const btn = e.target.closest("[data-act]");
   const fileLink = e.target.closest('.att-file[aria-disabled="true"]');
   if (fileLink) { e.preventDefault(); toast(navigator.onLine ? "링크를 준비하고 있습니다" : "오프라인에서는 파일을 열 수 없습니다"); return; }
@@ -1304,11 +1323,54 @@ $("#viewer").addEventListener("click", (e) => { if (e.target.id === "viewer") $(
 /* ---------------- 소재함 (메모에서 뽑은 문장·키워드 모으기) ---------------- */
 var ideas = [], boxNames = [], view = "memo", ideaBox = "", ideaEdit = null;
 const ideaDeletes = new Map();
-function flushIdeaDeletes() { [...ideaDeletes.entries()].forEach(([id, p]) => { clearTimeout(p.timer); ideaDeletes.delete(id); queue({ op: "delete", table: "clips", id }); }); }
+function flushIdeaDeletes() { [...ideaDeletes.entries()].forEach(([id, p]) => { clearTimeout(p.timer); ideaDeletes.delete(id); commitIdeaDelete(p.idea); }); }
 window.addEventListener("pagehide", flushIdeaDeletes);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushIdeaDeletes(); });
 const DEFAULT_BOXES = ["블로그 소재", "인스타툰 소재", "강의 주제"];
-function saveIdeas() { if (uid) { lsSet("memo-ideas-" + uid, ideas); lsSet("memo-boxes-" + uid, boxNames); } }
+function saveIdeas() { if (uid) { lsSet("memo-ideas-" + uid, ideas.filter((x) => !x._blank)); lsSet("memo-boxes-" + uid, boxNames); } }
+// 소재를 지울 때, 다른 소재·메모가 함께 쓰지 않는 사진·파일만 저장소에서 지웁니다
+function commitIdeaDelete(x) {
+  queue({ op: "delete", table: "clips", id: x.id });
+  const paths = (x.attachments || []).map((a) => a.path); if (!paths.length) return;
+  const used = new Set();
+  ideas.forEach((i) => { if (i.id !== x.id) (i.attachments || []).forEach((a) => used.add(a.path)); });
+  [...ideaDeletes.values()].forEach((p) => { if (p.idea.id !== x.id) (p.idea.attachments || []).forEach((a) => used.add(a.path)); });
+  memos.forEach((m) => (m.attachments || []).forEach((a) => used.add(a.path)));
+  const gone = paths.filter((pp) => !used.has(pp));
+  if (gone.length && navigator.onLine) sb.storage.from(BUCKET).remove(gone);
+}
+// 소재 본문: 서식·사진이 있으면 그대로, 없으면 글자만
+const ideaRich = (x) => !!(x.html && x.html.trim());
+function ideaBodyHTML(x) { return ideaRich(x) ? viewHTML({ html: x.html, body: x.text }) : richText(x.text).replace(/\n/g, "<br>"); }
+function ideaAttsHTML(x) {
+  const all = x.attachments || [], atts = all.filter((a) => !a.inline); if (!atts.length) return "";
+  const rm = ideaInline === x.id;
+  return `<div class="atts${rm ? " rm-on" : ""}">` + atts.map((a) => {
+    const i = all.indexOf(a), b = rm ? `<button type="button" class="att-x" data-ideact="att-rm" data-i="${i}" aria-label="${esc(a.name)} 빼기" title="이 파일 빼기">✕</button>` : "";
+    return b ? `<div class="att-cell${kind(a) !== "image" ? " wide" : ""}">${attOne(a, i)}${b}</div>` : attOne(a, i);
+  }).join("") + "</div>";
+}
+function refreshIdeaAtts(x) {
+  const card = document.querySelector(`#list .idea[data-iid="${x.id}"]`); if (!card) return;
+  const old = card.querySelector(".atts"), html = ideaAttsHTML(x);
+  if (old && old.contains(document.activeElement)) { const ed = card.querySelector(".idea-ed-body"); if (ed) ed.focus({ preventScroll: true }); }
+  if (old) old.outerHTML = html || "";
+  else if (html) { const meta = card.querySelector(".idea-meta"); if (meta) meta.insertAdjacentHTML("beforebegin", html); }
+}
+async function attachToIdea(files, x) {
+  if (!navigator.onLine) { toast("파일 첨부는 인터넷 연결이 필요합니다."); return; }
+  const items = files.filter((f) => f.size <= MAX_FILE).map((f) => ({ file: f, name: nameFor(f) }));
+  if (items.length < files.length) toast("50MB를 넘는 파일은 빼고 첨부합니다.");
+  if (!items.length) return;
+  try {
+    const added = await uploadFiles(x.id, items);
+    items.forEach((it, i) => { const a = added[i]; if (a && /^(image|video)\//.test(it.file.type)) urlCache.set(a.path, { url: URL.createObjectURL(it.file), exp: Date.now() + 3600 * 1000 }); });
+    patchIdea(x, { attachments: (x.attachments || []).concat(added), updated_at: new Date().toISOString() });
+    refreshIdeaAtts(x);
+    ensureUrls([x]).then(() => refreshIdeaAtts(x));
+    toast("파일 " + added.length + "개를 묶었습니다");
+  } catch (err) { toast("올리지 못했습니다: " + err.message); }
+}
 function allBoxes() {
   const set = [];
   [...DEFAULT_BOXES, ...boxNames, ...ideas.map((x) => x.box)].forEach((b) => { if (b && !set.includes(b)) set.push(b); });
@@ -1388,6 +1450,7 @@ function renderIdeas() {
     ? `<p class="idea-sum only-new"><span>아직 안 쓴 소재 <b>${activeN}</b>개만 보는 중</span><button type="button" class="only-new-off" data-onlynew="off">다 쓴 소재 ${usedN}개도 보기 ✕</button></p>`
     : `<p class="idea-sum"><button type="button" class="sum-link" data-onlynew="on" title="안 쓴 소재만 보기">쓸 소재 <b>${activeN}</b></button> · 다 쓴 소재 ${list.length - activeN}</p>`) + list.map(ideaHTML).join("");
   applyIdeaClips();
+  ensureUrls(list);
 }
 // 긴 소재는 윗부분만 보이게 접기 (다시 열면 접힘)
 const IDEA_LONG = 210, IDEA_CLIP = 130;
@@ -1418,11 +1481,13 @@ function ideaHTML(x) {
   const t = ms(x.created_at), ed = ideaInline === x.id;
   return `<article class="idea${x.used ? " off" : ""}${x._local ? " unsynced" : ""}${ed ? " inline" : ""}" data-iid="${x.id}">
     <div class="idea-main">
-      ${ed ? `<textarea class="idea-ed-text" rows="2" maxlength="2000" aria-label="소재 내용">${esc(x.text)}</textarea>
+      ${ed ? `${toolsHTML(true)}
+      <div class="rich editor idea-ed-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="소재 내용" data-ph="소재를 적거나 이미지·파일을 붙여넣으세요">${ideaRich(x) ? editHTML({ html: x.html, body: x.text }) : plainToHtml(x.text)}</div>
       <input class="idea-ed-note" type="text" maxlength="200" placeholder="한 줄 메모 (선택)" value="${esc(x.note || "")}" aria-label="한 줄 메모">
       <p class="idea-ed-help">바깥을 누르면 저장 · Esc 취소</p>`
-      : `<blockquote class="idea-text editable" title="눌러서 바로 고치기">${hl(x.text).replace(/\n/g, "<br>")}</blockquote>
+      : `<blockquote class="idea-text rich editable" title="눌러서 바로 고치기">${ideaBodyHTML(x)}</blockquote>
       ${x.note ? `<p class="idea-note editable" title="눌러서 바로 고치기">${hl(x.note)}</p>` : ""}`}
+      ${ideaAttsHTML(x)}
       <div class="idea-meta">
         <span class="idea-box">${esc(x.box)}</span>
         <time title="${fullStamp(t)}">${dateStr(t)}</time>
@@ -1443,41 +1508,57 @@ function ideaHTML(x) {
 /* 소재 바로 고치기: 글자를 누르면 그 자리에서 수정, 바깥을 누르면 저장 */
 var ideaInline = null;
 function fitArea(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
-function startIdeaInline(id, toNote) {
+function startIdeaInline(id, toNote, pt) {
   if (ideaInline === id) return;
   if (ideaInline) finishIdeaInline(true);
   if (inlineId) finishInline();
   ideaInline = id; hideIdeaFab(); render();
   const card = document.querySelector(`.idea[data-iid="${id}"]`); if (!card) return;
-  const ta = card.querySelector(".idea-ed-text"), el = toNote ? card.querySelector(".idea-ed-note") : ta;
-  fitArea(ta); el.focus({ preventScroll: true });
-  if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+  const ed = card.querySelector(".idea-ed-body");
+  ed.classList.toggle("is-empty", isEmptyEditor(ed));
+  if (toNote) { const el = card.querySelector(".idea-ed-note"); el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length); return; }
+  ed.focus({ preventScroll: true });
+  let r = pt && document.caretRangeFromPoint ? document.caretRangeFromPoint(pt.x, pt.y) : null;
+  if (!r || !ed.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(ed); r.collapse(false); }
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
 }
 function finishIdeaInline(save) {
   const id = ideaInline; if (!id) return;
   const card = document.querySelector(`.idea[data-iid="${id}"]`), x = ideas.find((i) => i.id === id);
   ideaInline = null; pendingRender = false;
-  if (x && card && save) {
-    const text = card.querySelector(".idea-ed-text").value.trim(), note = card.querySelector(".idea-ed-note").value.trim();
-    if (!text) toast("소재 내용이 비어 있어 원래대로 두었습니다");
-    else if (text !== x.text || note !== (x.note || "")) {
-      const before = { text: x.text, note: x.note || "" };
-      saveIdea(x, { text, note, updated_at: new Date().toISOString() });
-      toast("소재를 고쳤습니다", "되돌리기", () => { saveIdea(x, { ...before, updated_at: new Date().toISOString() }); render(); });
+  document.querySelectorAll(".pop.open").forEach((p) => p.classList.remove("open"));
+  const ed = card && card.querySelector(".idea-ed-body");
+  if (x && ed && save) {
+    const html = storeHTML(ed), text = textOf(ed), note = card.querySelector(".idea-ed-note").value.trim();
+    const hasMedia = !!ed.querySelector("img, video, table, hr") || (x.attachments || []).some((a) => !a.inline);
+    // 글자만 있으면 서식 없이 글자로 저장 (서식·사진·표가 있을 때만 html 보관)
+    const plain = !ed.querySelector("img, video, table, hr, span[class], b, strong, ul, ol");
+    const newHtml = plain ? "" : html;
+    if (!text && !hasMedia) {
+      if (x._blank) { ideas = ideas.filter((i) => i.id !== x.id); saveIdeas(); commitIdeaDelete(x); }
+      else toast("소재 내용이 비어 있어 원래대로 두었습니다");
+    } else if (x._blank || text !== x.text || note !== (x.note || "") || newHtml !== (x.html || "")) {
+      const wasBlank = !!x._blank, before = { text: x.text, note: x.note || "", html: x.html || "" };
+      delete x._blank;
+      saveIdea(x, { text, note, html: newHtml, updated_at: new Date().toISOString() });
+      if (wasBlank) toast(`'${x.box}'에 소재를 보관했습니다`);
+      else toast("소재를 고쳤습니다", "되돌리기", () => { saveIdea(x, { ...before, updated_at: new Date().toISOString() }); render(); });
     }
-  }
+  } else if (x && x._blank) { ideas = ideas.filter((i) => i.id !== x.id); saveIdeas(); commitIdeaDelete(x); }
   softRender();
 }
-document.addEventListener("input", (e) => { if (e.target.classList && e.target.classList.contains("idea-ed-text")) fitArea(e.target); });
+document.addEventListener("input", (e) => { if (e.target.classList && e.target.classList.contains("idea-ed-body")) e.target.classList.toggle("is-empty", isEmptyEditor(e.target)); });
 document.addEventListener("keydown", (e) => {
   if (!ideaInline || !e.target.closest || !e.target.closest(".idea.inline")) return;
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Escape") { e.preventDefault(); finishIdeaInline(false); }
   else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.target.classList.contains("idea-ed-note"))) { e.preventDefault(); finishIdeaInline(true); }
 });
+// 아직 저장 전인 새 소재(_blank)는 화면에만 반영하고, 다 쓰고 나면 한 번에 올립니다
+function patchIdea(x, patch) { if (x._blank) Object.assign(x, patch); else saveIdea(x, patch); }
 function saveIdea(x, patch) {
   Object.assign(x, patch, { _local: true }); saveIdeas();
-  const { _local, ...row } = x;
+  const { _local, _blank, ...row } = x;
   queue({ op: "upsert", table: "clips", row });
 }
 function addBox(name) {
@@ -1490,7 +1571,7 @@ function addBox(name) {
 $("#ideaBar").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.ideact === "newbox") { openIdeaDlg({ mode: "box" }); return; }
-  if (b.dataset.ideact === "write") { openIdeaDlg({ mode: "new", text: "", memoId: null }); return; }
+  if (b.dataset.ideact === "write") { writeNewIdea(); return; }
   const nb = e.target.closest(".n-new");
   ideaOnlyNew = !!(nb && !nb.classList.contains("zero"));   // 숫자를 누르면 그 함의 안 쓴 소재만, 이름을 누르면 전부
   ideaBox = b.dataset.box || ""; render();
@@ -1499,13 +1580,33 @@ $("#list").addEventListener("click", (e) => {
   if (view !== "ideas") return;
   const card = e.target.closest(".idea"); if (!card) return;
   if (card.classList.contains("inline") && !e.target.closest("[data-ideact]")) return;
+  const tg = e.target.closest('[data-act="tag"]'); if (tg) { setTagFilter(tg.dataset.tag); return; }
+  const vb = e.target.closest('[data-act="view"]');
+  if (vb) { const x0 = ideas.find((i) => i.id === card.dataset.iid), a = x0 && (x0.attachments || [])[+vb.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
+  if (e.target.closest(".atts")) return;
+  const im = e.target.closest(".idea-text img");
+  if (im && im.src && !e.target.closest(".idea-text.clipped")) { $("#viewerImg").src = im.src; $("#viewer").showModal(); return; }
   if (!e.target.closest("[data-ideact]") && e.target.closest(".idea-text.clipped")) { if (!String(getSelection()).length) toggleIdeaClip(card); return; }
   const tx = !e.target.closest("[data-ideact], a") && e.target.closest(".idea-text, .idea-note");
-  if (tx) { if (!String(getSelection()).length) startIdeaInline(card.dataset.iid, tx.classList.contains("idea-note")); return; }
+  if (tx) { if (!String(getSelection()).length) startIdeaInline(card.dataset.iid, tx.classList.contains("idea-note"), { x: e.clientX, y: e.clientY }); return; }
   const b = e.target.closest("[data-ideact]"); if (!b) return;
   if (b.dataset.ideact === "clip") { toggleIdeaClip(card); return; }
   const x = ideas.find((i) => i.id === card.dataset.iid); if (!x) return;
   const act = b.dataset.ideact;
+  if (act === "att-rm") {
+    const a = (x.attachments || [])[+b.dataset.i]; if (!a) return;
+    patchIdea(x, { attachments: x.attachments.filter((y) => y !== a), updated_at: new Date().toISOString() }); refreshIdeaAtts(x);
+    const timer = setTimeout(() => {
+      const still = ideas.some((i) => (i.attachments || []).some((y) => y.path === a.path)) || memos.some((m) => (m.attachments || []).some((y) => y.path === a.path));
+      if (!still && navigator.onLine) sb.storage.from(BUCKET).remove([a.path]);
+    }, 8000);
+    toast("'" + a.name + "' 파일을 뺐습니다", "되돌리기", () => {
+      clearTimeout(timer); const xx = ideas.find((i) => i.id === x.id); if (!xx) return;
+      patchIdea(xx, { attachments: (xx.attachments || []).concat(a), updated_at: new Date().toISOString() });
+      if (ideaInline === xx.id) refreshIdeaAtts(xx); else render();
+    }, 8000);
+    return;
+  }
   if (act === "toggle") { saveIdea(x, { used: !x.used, updated_at: new Date().toISOString() }); render(); toast(x.used ? "다 쓴 소재로 흐리게 바꿨습니다" : "다시 쓸 소재로 켰습니다"); }
   if (act === "copy") {
     navigator.clipboard.writeText(x.text).then(() => toast("소재를 복사했습니다"), () => toast("복사하지 못했습니다. 글자를 길게 눌러 복사해 주세요"));
@@ -1519,7 +1620,7 @@ $("#list").addEventListener("click", (e) => {
   }
   if (act === "del") {
     ideas = ideas.filter((i) => i.id !== x.id); saveIdeas(); render();
-    ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); queue({ op: "delete", table: "clips", id: x.id }); }, 7000) });
+    ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); commitIdeaDelete(x); }, 7000) });
     toast("소재를 삭제했습니다", "되돌리기", () => {
       const p = ideaDeletes.get(x.id); if (!p) return;
       clearTimeout(p.timer); ideaDeletes.delete(x.id); ideas.push(x); saveIdeas(); render(); toast("소재를 되살렸습니다");
@@ -1550,12 +1651,12 @@ $("#moveToMemo").addEventListener("click", () => {
   const x = moveTarget; if (!x) return;
   const now = new Date().toISOString(), id = newId();
   const body = x.text + (x.note ? "\n\n" + x.note : "");
-  const html = plainToHtml(body);
-  const row = { id, user_id: uid, title: "", body, html, tags: [], todo: false, done: false, pinned: false, attachments: [], history: [], created_at: now, updated_at: now };
+  const html = ideaRich(x) ? clean(x.html) + (x.note ? "<p><br></p><p>" + esc(x.note) + "</p>" : "") : plainToHtml(body);
+  const row = { id, user_id: uid, title: "", body, html, tags: [], todo: false, done: false, pinned: false, attachments: (x.attachments || []).slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
   ideas = ideas.filter((i) => i.id !== x.id); saveIdeas();
-  ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); queue({ op: "delete", table: "clips", id: x.id }); }, 7000) });
+  ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); commitIdeaDelete(x); }, 7000) });
   moveDlg.close(); render();
   toast("메모 목록으로 옮겼습니다", "되돌리기", () => {
     const p = ideaDeletes.get(x.id); if (p) { clearTimeout(p.timer); ideaDeletes.delete(x.id); }
@@ -1596,12 +1697,24 @@ ideaFab.addEventListener("click", () => {
 /* 보관·수정 창 */
 const ideaDlg = $("#ideaDlg");
 let dlgState = null;
+// + 소재 쓰기: 빈 소재 카드를 맨 위에 열고, 메모처럼 서식·이미지·영상·표·파일을 넣어 씁니다
+function writeNewIdea() {
+  if (ideaInline) finishIdeaInline(true);
+  if (inlineId) finishInline();
+  const bx = ideaBox || keepBoxes(lastBoxes())[0], now = new Date().toISOString();
+  const x = { id: newId(), user_id: uid, memo_id: null, box: bx, text: "", note: "", html: "", attachments: [], used: false, created_at: now, updated_at: now, _blank: true };
+  ideas.unshift(x); ideaOnlyNew = false; query = ""; $("#q").value = "";
+  startIdeaInline(x.id);
+  const card = document.querySelector(`.idea[data-iid="${x.id}"]`);
+  if (card) card.scrollIntoView({ block: "center", behavior: "smooth" });
+}
 function openIdeaDlg(st) {
   dlgState = st;
   dlgState.boxes = keepBoxes(st.mode === "edit" ? [st.idea.box] : ideaBox ? [ideaBox] : lastBoxes());
   dlgState.box = dlgState.boxes[0];
   $("#ideaDlgTitle").textContent = st.mode === "edit" ? "소재 수정" : st.mode === "box" ? "새 소재함 만들기" : st.text ? "소재로 보관" : "소재 직접 쓰기";
-  $("#ideaTextWrap").hidden = st.mode === "box";
+  st.rich = st.mode === "edit" && (ideaRich(st.idea) || (st.idea.attachments || []).length > 0);   // 사진·서식이 있는 소재는 글을 카드에서 바로 고칩니다
+  $("#ideaTextWrap").hidden = st.mode === "box" || st.rich;
   $("#ideaMoveRow").hidden = !st.fromMemo;
   if (st.fromMemo) {
     const mm = memos.find((x) => x.id === st.memoId), hasFiles = mm && (mm.attachments || []).length > 0;
@@ -1617,7 +1730,7 @@ function openIdeaDlg(st) {
   $("#ideaSave").textContent = st.mode === "edit" ? "저장" : st.mode === "box" ? "만들기" : "보관";
   renderBoxPick();
   ideaDlg.showModal();
-  setTimeout(() => (st.mode === "box" ? $("#newBoxInput") : st.text ? $("#ideaNote") : $("#ideaText")).focus(), 50);
+  setTimeout(() => (st.mode === "box" ? $("#newBoxInput") : st.text || st.rich ? $("#ideaNote") : $("#ideaText")).focus(), 50);
 }
 function renderBoxPick() {
   $("#ideaBoxPick").innerHTML = allBoxes().map((b) => `<button type="button" class="chip" aria-pressed="${dlgState.mode === "box" ? dlgState.box === b : dlgState.boxes.includes(b)}" data-pick="${esc(b)}">${dlgState.mode !== "box" && dlgState.boxes.includes(b) ? "✓ " : ""}${esc(b)}</button>`).join("") +
@@ -1641,8 +1754,8 @@ $("#ideaSave").addEventListener("click", () => {
   const st = dlgState; if (!st) return;
   if (st.mode === "box") { $("#newBoxAdd").click(); return; }
   if ($("#newBoxInput").value.trim()) commitNewBox();
-  const text = $("#ideaText").value.trim(), note = $("#ideaNote").value.trim();
-  if (!text) { toast("소재 내용을 적어주세요"); $("#ideaText").focus(); return; }
+  const text = st.rich ? st.idea.text : $("#ideaText").value.trim(), note = $("#ideaNote").value.trim();
+  if (!text && !st.rich) { toast("소재 내용을 적어주세요"); $("#ideaText").focus(); return; }
   const now = new Date().toISOString();
   const bs = st.boxes.slice();
   lsSet("memo-last-box", bs[0]);
@@ -1651,7 +1764,7 @@ $("#ideaSave").addEventListener("click", () => {
     const keep = bs.includes(st.idea.box) ? st.idea.box : bs[0];
     saveIdea(st.idea, { text, note, box: keep, updated_at: now });
     const extra = bs.filter((b) => b !== keep);
-    extra.forEach((b) => { const y = { id: newId(), user_id: uid, memo_id: st.idea.memo_id || null, box: b, text, note, used: false, created_at: now, updated_at: now }; ideas.unshift(y); saveIdea(y, {}); });
+    extra.forEach((b) => { const y = { id: newId(), user_id: uid, memo_id: st.idea.memo_id || null, box: b, text, note, html: st.idea.html || "", attachments: (st.idea.attachments || []).slice(), used: false, created_at: now, updated_at: now }; ideas.unshift(y); saveIdea(y, {}); });
     ideaDlg.close(); render(); toast(extra.length ? `소재를 수정하고 ${boxLabel(extra)}에도 넣었습니다` : "소재를 수정했습니다"); return;
   }
   lsSet("memo-last-boxes", bs);
@@ -1823,7 +1936,15 @@ function makeDraft() {
   const body = "소재 " + picked.length + "개를 모았습니다. 아래 소재를 엮어 글을 써 보세요.\n\n" + parts.join("\n\n");
   const d = new Date();
   const title = "초안 · 소재 " + picked.length + "개 (" + (d.getMonth() + 1) + "/" + d.getDate() + ")";
-  const row = { id, user_id: uid, title, body, html: plainToHtml(body), tags: ["초안"], todo: false, done: false, pinned: false, attachments: [], history: [], created_at: now, updated_at: now };
+  // 사진·서식이 있는 소재는 그 모습 그대로 초안에 넣고, 묶은 파일도 함께 붙입니다
+  const html = picked.some((x) => ideaRich(x)) ? plainToHtml("소재 " + picked.length + "개를 모았습니다. 아래 소재를 엮어 글을 써 보세요.") + picked.map((x, i) => {
+    const src = srcOf(x);
+    return "<p><br></p><p><b>" + (i + 1) + ".</b></p>" + (ideaRich(x) ? clean(x.html) : plainToHtml(x.text.trim())) +
+      (x.note ? "<p>↳ " + esc(x.note.trim()) + "</p>" : "") + "<p>(" + esc(x.box + (src ? " · " + src : "")) + ")</p>";
+  }).join("") : plainToHtml(body);
+  const seen = new Set(), atts = [];
+  picked.forEach((x) => (x.attachments || []).forEach((a) => { if (!seen.has(a.path)) { seen.add(a.path); atts.push(a); } }));
+  const row = { id, user_id: uid, title, body, html, tags: ["초안"], todo: false, done: false, pinned: false, attachments: atts, history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
   setSelMode(false); selIds.clear();
@@ -1842,7 +1963,7 @@ function deleteSelected() {
   if (view === "ideas") {
     const gone = ideas.filter((x) => ids.includes(x.id));
     ideas = ideas.filter((x) => !ids.includes(x.id)); saveIdeas();
-    gone.forEach((x) => ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); queue({ op: "delete", table: "clips", id: x.id }); }, 8000) }));
+    gone.forEach((x) => ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); commitIdeaDelete(x); }, 8000) }));
     render();
     toast(`소재 ${gone.length}개를 삭제했습니다`, "되돌리기", () => {
       gone.forEach((x) => { const p = ideaDeletes.get(x.id); if (!p) return; clearTimeout(p.timer); ideaDeletes.delete(x.id); ideas.push(x); });
