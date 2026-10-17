@@ -607,6 +607,30 @@ function refreshAtts(m) {
   if (old) old.outerHTML = html || "";
   else if (html) { const meta = art.querySelector(".m-meta"); if (meta) meta.insertAdjacentHTML("beforebegin", html); }
 }
+// 태그 없이 엔터(\n)로만 줄이 나뉜 글: 정리(sanitize) 전에 엔터를 <br>로 바꿔 줄바꿈을 지킴
+// (pre 영역, white-space:pre 스타일, 또는 줄 구조 태그가 전혀 없는 복사본)
+function keepBreaks(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html"), body = doc.body;
+  const structured = !!body.querySelector("br, p, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote, pre");
+  const preLike = (n) => {
+    for (let el = n.parentElement; el && el !== body; el = el.parentElement) {
+      if (el.tagName === "PRE" || el.tagName === "TEXTAREA") return true;
+      if (/pre|break-spaces/.test((el.style && el.style.whiteSpace) || "")) return true;
+    }
+    return false;
+  };
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT), nodes = [];
+  while (walker.nextNode()) if (/[\r\n]/.test(walker.currentNode.nodeValue)) nodes.push(walker.currentNode);
+  nodes.forEach((n) => {
+    if (structured && !preLike(n)) return;
+    const parts = n.nodeValue.replace(/\r\n?/g, "\n").split("\n"), frag = doc.createDocumentFragment();
+    parts.forEach((p, i) => { if (i) frag.appendChild(doc.createElement("br")); if (p) frag.appendChild(doc.createTextNode(p)); });
+    n.replaceWith(frag);
+  });
+  body.querySelectorAll("pre").forEach((p) => { const d = doc.createElement("div"); d.innerHTML = p.innerHTML; p.replaceWith(d); });
+  return body.innerHTML;
+}
+const textToHTML = (t) => esc(String(t).replace(/\r\n?/g, "\n")).replace(/\n/g, "<br>");
 // 붙여넣기: 파일은 글 사이에, 웹에서 복사한 글은 안전하게 정리해서
 document.addEventListener("paste", (e) => {
   const ed = e.target.closest && e.target.closest(".editor");
@@ -617,11 +641,18 @@ document.addEventListener("paste", (e) => {
     const html = dt.getData("text/html");
     if (html) {
       e.preventDefault();
-      const b = box(); b.innerHTML = clean(html);
+      const b = box(); b.innerHTML = clean(keepBreaks(html));
       b.querySelectorAll("img, video").forEach((x) => { if (!x.getAttribute("data-path")) x.remove(); });
       fillMedia(b);
-      document.execCommand("insertHTML", false, b.innerHTML);
+      // 그래도 줄이 사라졌다면(원본 줄 수보다 적으면) 글자만 줄바꿈 그대로 넣기
+      const plain = dt.getData("text/plain") || "";
+      const want = (plain.replace(/\r\n?/g, "\n").trim().match(/\n/g) || []).length;
+      const got = b.querySelectorAll("br, p, div, li, tr, h1, h2, h3, h4, blockquote").length;
+      document.execCommand("insertHTML", false, want > 0 && got === 0 && !b.querySelector("img, video, table") ? textToHTML(plain) : b.innerHTML);
+      return;
     }
+    const plainOnly = dt.getData("text/plain");
+    if (plainOnly && /[\r\n]/.test(plainOnly)) { e.preventDefault(); document.execCommand("insertHTML", false, textToHTML(plainOnly)); }
     return;
   }
   // 입력칸 밖에서 붙여넣으면 새 메모 칸으로
@@ -630,7 +661,7 @@ document.addEventListener("paste", (e) => {
   if (!files.length && !text) return;
   e.preventDefault();
   const cb = $("#cBody");
-  if (text) { cb.focus(); const r = document.createRange(); r.selectNodeContents(cb); r.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand("insertText", false, text); }
+  if (text) { cb.focus(); const r = document.createRange(); r.selectNodeContents(cb); r.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand("insertHTML", false, textToHTML(text)); }
   if (files.length) insertFiles(files, cb);
 });
 // 끌어다 놓기
