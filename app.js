@@ -949,7 +949,7 @@ function attOne(a, i) {
     if (k === "video" && c) return `<video class="att-video" src="${esc(c.url)}" controls playsinline preload="metadata"></video>`;
     if (k === "audio" && c) return `<audio class="att-audio" src="${esc(c.url)}" controls preload="metadata"></audio>`;
     const href = c ? esc(c.dl || c.url) : "#";
-    return `<a class="att-file" href="${href}" target="_blank" rel="noopener"${c ? "" : ' aria-disabled="true"'}>
+    return `<a class="att-file" href="${href}" target="_blank" rel="noopener" data-path="${esc(a.path)}" title="미리보기"${c ? "" : ' aria-disabled="true"'}>
       <span class="ext">${esc(extOf(a.name) || "file")}</span><span class="fname">${hl(a.name)}</span><span class="fsize">${fmtSize(a.size || 0)}</span></a>`;
   }
 }
@@ -1250,7 +1250,7 @@ $("#list").addEventListener("click", async (e) => {
   if (!btn) {
     if (e.target.closest(".memo.inline")) return;
     const img = e.target.closest(".m-body img");
-    if (img && img.src) { $("#viewerImg").src = img.src; $("#viewer").showModal(); return; }
+    if (img && img.src) { openViewer({ url: img.src }); return; }
     // 글자를 누르면 바로 수정 (링크·영상·첨부는 그대로)
     if (e.target.closest("a, video, .atts, .hist, .confirm")) return;
     const clipped = e.target.closest(".m-body.clipped");   // 접힌 메모는 누르면 먼저 펼침
@@ -1277,7 +1277,7 @@ $("#list").addEventListener("click", async (e) => {
     }, 8000);
     return;
   }
-  if (act === "view") { const a = m.attachments[+btn.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
+  if (act === "view") { const a = m.attachments[+btn.dataset.i], c = a && urlCache.get(a.path); if (c) openViewer({ url: c.url, name: a.name, type: a.type, size: a.size }); return; }
   if (act === "done") { saveMemo(m, { done: !m.done }); return render(); }
   if (act === "read") {
     const now = !m.done; saveMemo(m, { done: now }); render();
@@ -1348,8 +1348,171 @@ $("#list").addEventListener("keydown", (e) => {
   if (!editDraft) return;
   if (e.key === "Escape") document.querySelector('[data-act="e-cancel"]')?.click();
 });
-$("#viewerClose").onclick = () => $("#viewer").close();
-$("#viewer").addEventListener("click", (e) => { if (e.target.id === "viewer") $("#viewer").close(); });
+/* ---------------- 크게 보기 · 파일 미리보기 · 저장 (v5.18) ---------------- */
+// 폰(터치 기기)에서는 공유 시트로 넘겨 '이미지 저장'·'파일에 저장'을 고를 수 있게 하고,
+// PC에서는 바로 내려받습니다. 파일은 누르면 먼저 미리보기를 엽니다.
+const VW_TOUCH = matchMedia("(pointer:coarse)").matches;
+const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/";
+const TEXT_EXT = /^(txt|md|markdown|csv|tsv|json|log|xml|html?|css|js|ts|py|yml|yaml|ini|srt|vtt|sql)$/;
+const OFFICE_EXT = /^(docx?|xlsx?|pptx?)$/;
+const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "application/pdf": "pdf" };
+let vw = { token: 0, blob: null, blobP: null, name: "", url: "", dl: "", type: "" };
+
+function attByUrl(src) {   // 글 속 이미지 주소로 원래 첨부 정보 찾기
+  for (const [path, c] of urlCache) if (c.url === src || c.dl === src) {
+    for (const x of [...memos, ...(typeof ideas !== "undefined" ? ideas : [])])
+      for (const a of (x.attachments || [])) if (a.path === path) return a;
+  }
+  return null;
+}
+function attByPath(path) {
+  for (const x of [...memos, ...(typeof ideas !== "undefined" ? ideas : [])])
+    for (const a of (x.attachments || [])) if (a.path === path) return a;
+  return null;
+}
+function fetchBlob(url) {
+  return fetch(url, { mode: "cors", credentials: "omit" }).then((r) => { if (!r.ok) throw new Error(r.status); return r.blob(); });
+}
+function decodeText(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf).replace(/^﻿/, ""); }
+  catch { try { return new TextDecoder("euc-kr").decode(buf); } catch { return new TextDecoder().decode(buf); } }
+}
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((ok, no) => {
+    const sc = document.createElement("script"); sc.src = PDFJS + "pdf.min.js";
+    sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; ok(window.pdfjsLib); };
+    sc.onerror = () => no(new Error("pdf.js")); document.head.appendChild(sc);
+  });
+}
+async function renderPdf(blob, box, token) {
+  const lib = await loadPdfJs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  if (token !== vw.token) return;
+  box.innerHTML = '<div class="vw-pages"></div>';
+  const wrap = box.firstChild, max = Math.min(doc.numPages, 40), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.min(box.clientWidth - 20, 900);
+  for (let n = 1; n <= max; n++) {
+    if (token !== vw.token) return;
+    const page = await doc.getPage(n), v1 = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: (w / v1.width) * dpr });
+    const cv = document.createElement("canvas"); cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height);
+    cv.style.width = Math.floor(vp.width / dpr) + "px"; wrap.appendChild(cv);
+    await page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+  }
+  if (doc.numPages > max) box.insertAdjacentHTML("beforeend", `<p class="vw-note">앞 ${max}쪽까지 보여드립니다 (전체 ${doc.numPages}쪽). 전체는 저장해서 열어주세요.</p>`);
+}
+
+function openViewer({ url, name, type, size, dl }) {
+  if (!url) return;
+  const a = (!name && attByUrl(url)) || null;
+  if (a) { name = a.name; type = a.type; size = a.size; }
+  const token = ++vw.token, dlg = $("#viewer"), body = $("#vwBody");
+  const ext = extOf(name || "");
+  const isImg = (type || "").startsWith("image/") ? !/heic|heif|tiff/.test(type) : (!name || /^(jpe?g|png|gif|webp|bmp|svg)$/.test(ext));
+  vw = { token, blob: null, blobP: null, name: name || "", url, dl: dl || url, type: type || "" };
+  $("#vwName").textContent = name || "";
+  $("#vwSave").removeAttribute("aria-busy");
+  dlg.classList.toggle("doc", !isImg);
+  // 저장을 누르는 순간 바로 공유 시트를 띄울 수 있게 미리 받아둡니다 (폰은 누른 직후에만 공유가 허용됨)
+  const big = (size || 0) > 60 * 1048576;
+  if (!big) vw.blobP = fetchBlob(url).then((b) => { if (token === vw.token) vw.blob = b; return b; }).catch(() => null);
+
+  if (isImg) {
+    body.innerHTML = "";
+    const im = document.createElement("img"); im.className = "vw-img"; im.alt = name || ""; im.src = url; body.appendChild(im);
+  } else if (ext === "pdf" || type === "application/pdf") {
+    body.innerHTML = '<p class="vw-msg">미리보기를 준비하고 있습니다…</p>';
+    (vw.blobP || Promise.resolve(null)).then((b) => {
+      if (token !== vw.token) return;
+      if (!b) throw new Error("blob");
+      return renderPdf(b, body, token);
+    }).catch(() => { if (token === vw.token) noPreview(body, ext, "PDF 미리보기를 불러오지 못했습니다."); });
+  } else if (TEXT_EXT.test(ext) || (type || "").startsWith("text/")) {
+    body.innerHTML = '<p class="vw-msg">불러오는 중…</p>';
+    (vw.blobP || Promise.resolve(null)).then(async (b) => {
+      if (token !== vw.token) return;
+      if (!b) throw new Error("blob");
+      const buf = await b.slice(0, 2 * 1048576).arrayBuffer();
+      const pre = document.createElement("pre"); pre.className = "vw-text"; pre.textContent = decodeText(buf);
+      body.innerHTML = ""; body.appendChild(pre);
+      if (b.size > 2 * 1048576) body.insertAdjacentHTML("beforeend", '<p class="vw-note">앞부분 2MB까지만 보여드립니다. 전체는 저장해서 열어주세요.</p>');
+    }).catch(() => { if (token === vw.token) noPreview(body, ext, "내용을 불러오지 못했습니다."); });
+  } else if (OFFICE_EXT.test(ext)) {
+    body.innerHTML = `<div class="vw-msg"><span class="ext">${esc(ext)}</span><br>워드·엑셀·파워포인트 파일은 Microsoft 온라인 뷰어로 미리 볼 수 있습니다.<br>
+      <small>누르면 이 파일의 임시 주소(6시간 유효)가 Microsoft에 전달됩니다.</small><br>
+      <button type="button" class="btn primary" id="vwOffice">Microsoft 뷰어로 미리보기</button></div>`;
+    $("#vwOffice").onclick = () => {
+      if (token !== vw.token) return;
+      body.innerHTML = `<iframe class="vw-frame" title="${esc(name || "")} 미리보기" src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}"></iframe>`;
+    };
+  } else {
+    noPreview(body, ext, "이 형식은 미리보기를 지원하지 않습니다.");
+  }
+  if (!dlg.open) dlg.showModal();
+}
+function noPreview(body, ext, msg) {
+  body.innerHTML = `<div class="vw-msg"><span class="ext">${esc(ext || "file")}</span><br>${esc(msg)}<br>위의 <b>저장</b>을 눌러 기기에서 열어주세요.</div>`;
+}
+function closeViewer() {
+  vw.token++; vw.blob = null; vw.blobP = null;
+  $("#vwBody").innerHTML = "";   // 영상·문서 뷰어 정리
+  if ($("#viewer").open) $("#viewer").close();
+}
+function fileNameFor(blob) {
+  if (vw.name) return vw.name;
+  const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+  return "메모이미지_" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "_" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + "." + (MIME_EXT[blob.type] || "jpg");
+}
+function downloadBlob(blob, name) {
+  const u = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 30000);
+}
+async function saveViewer() {
+  const btn = $("#vwSave"), token = vw.token;
+  let blob = vw.blob;
+  if (!blob && VW_TOUCH && vw.blobP) {   // 아직 받는 중: 받은 뒤 한 번 더 누르게 안내 (폰은 누른 직후에만 공유 가능)
+    btn.setAttribute("aria-busy", "true"); toast("저장 준비 중입니다. 잠시 후 한 번 더 눌러주세요");
+    await vw.blobP; if (token === vw.token) btn.removeAttribute("aria-busy");
+    return;
+  }
+  if (!blob && vw.blobP) { btn.setAttribute("aria-busy", "true"); blob = await vw.blobP; if (token === vw.token) btn.removeAttribute("aria-busy"); }
+  if (token !== vw.token) return;
+  if (!blob) {   // 내려받기에 실패하면 새 창으로 열기 (폰에서는 길게 눌러 저장)
+    window.open(vw.dl || vw.url, "_blank", "noopener");
+    if (VW_TOUCH) toast("새 창에서 길게 눌러 저장해 주세요");
+    return;
+  }
+  const name = fileNameFor(blob), type = blob.type || vw.type || "application/octet-stream";
+  if (VW_TOUCH && navigator.canShare) {
+    const file = new File([blob], name, { type });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); }
+      catch (err) {
+        if (err && err.name === "AbortError") return;   // 사용자가 공유 창을 닫음
+        if (err && err.name === "NotAllowedError") { toast("한 번 더 눌러주세요"); return; }
+        downloadBlob(blob, name);
+      }
+      return;
+    }
+  }
+  downloadBlob(blob, name);
+  if (!VW_TOUCH) toast("'" + name + "'을(를) 내려받았습니다");
+}
+$("#vwSave").onclick = saveViewer;
+$("#viewerClose").onclick = closeViewer;
+$("#viewer").addEventListener("click", (e) => { if (e.target.id === "viewer") closeViewer(); });
+$("#viewer").addEventListener("close", () => { if ($("#viewer").open) return; vw.token++; $("#vwBody").innerHTML = ""; });   // Esc로 닫을 때 정리 (바로 다시 열린 경우는 건너뜀)
+// 첨부 파일을 누르면 내려받기 대신 미리보기 (Ctrl/⌘+클릭은 예전처럼 새 탭)
+document.addEventListener("click", (e) => {
+  const f = e.target.closest('.att-file[data-path]:not([aria-disabled="true"])');
+  if (!f || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const a = attByPath(f.dataset.path), c = urlCache.get(f.dataset.path);
+  if (!a || !c) return;
+  e.preventDefault(); e.stopPropagation();
+  openViewer({ url: c.url, dl: c.dl, name: a.name, type: a.type, size: a.size });
+}, true);
+
 
 /* ---------------- 소재함 (메모에서 뽑은 문장·키워드 모으기) ---------------- */
 var ideas = [], boxNames = [], view = "memo", ideaBox = "", ideaEdit = null;
@@ -1613,10 +1776,10 @@ $("#list").addEventListener("click", (e) => {
   if (card.classList.contains("inline") && !e.target.closest("[data-ideact]")) return;
   const tg = e.target.closest('[data-act="tag"]'); if (tg) { setTagFilter(tg.dataset.tag); return; }
   const vb = e.target.closest('[data-act="view"]');
-  if (vb) { const x0 = ideas.find((i) => i.id === card.dataset.iid), a = x0 && (x0.attachments || [])[+vb.dataset.i], c = a && urlCache.get(a.path); if (c) { $("#viewerImg").src = c.url; $("#viewer").showModal(); } return; }
+  if (vb) { const x0 = ideas.find((i) => i.id === card.dataset.iid), a = x0 && (x0.attachments || [])[+vb.dataset.i], c = a && urlCache.get(a.path); if (c) openViewer({ url: c.url, name: a.name, type: a.type, size: a.size }); return; }
   if (e.target.closest(".atts")) return;
   const im = e.target.closest(".idea-text img");
-  if (im && im.src && !e.target.closest(".idea-text.clipped")) { $("#viewerImg").src = im.src; $("#viewer").showModal(); return; }
+  if (im && im.src && !e.target.closest(".idea-text.clipped")) { openViewer({ url: im.src }); return; }
   if (!e.target.closest("[data-ideact]") && e.target.closest(".idea-text.clipped")) { if (!String(getSelection()).length) toggleIdeaClip(card); return; }
   const tx = !e.target.closest("[data-ideact], a") && e.target.closest(".idea-text, .idea-note");
   if (tx) { if (!String(getSelection()).length) startIdeaInline(card.dataset.iid, tx.classList.contains("idea-note"), { x: e.clientX, y: e.clientY }); return; }

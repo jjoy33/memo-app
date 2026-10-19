@@ -118,9 +118,14 @@
   </div>
 </dialog>
 
-<dialog id="viewer" class="viewer">
-  <button type="button" class="viewer-close" id="viewerClose" aria-label="닫기">✕</button>
-  <img id="viewerImg" alt="">
+<dialog id="viewer" class="viewer" aria-label="크게 보기">
+  <div class="vw-bar">
+    <span class="vw-name" id="vwName"></span>
+    <button type="button" class="vw-btn" id="vwSave" aria-label="저장">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg><span>저장</span></button>
+    <button type="button" class="viewer-close" id="viewerClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="vw-body" id="vwBody"></div>
 </dialog>
 
 <button type="button" class="idea-fab" id="ideaFab" hidden>
