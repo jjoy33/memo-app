@@ -228,6 +228,12 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .rich img:not([src]){min-height:80px;width:160px}
 .memo:not(.inline) .rich img{cursor:zoom-in}
 .rich img[data-uploading],.rich video[data-uploading]{opacity:.5}
+/* 링크 카드: 단축어 공유로 저장한 인스타·웹 링크 (v5.19) */
+.rich blockquote.lc{margin:6px 0;padding:10px 12px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;background:var(--surface-2);overflow-wrap:anywhere}
+.rich blockquote.lc b{display:block;font-size:1.02em;line-height:1.4;margin-bottom:2px}
+.rich blockquote.lc > div:not(:first-child):not(:last-child){color:var(--muted);font-size:.92em;line-height:1.5}
+.rich blockquote.lc img{max-height:240px;width:auto;margin:8px 0 4px}
+.rich blockquote.lc a{font-size:.85em;color:var(--t-blue);word-break:break-all}
 .rich table.mt{border-collapse:collapse;margin:6px 0;max-width:100%;display:block;overflow-x:auto}
 .rich table.mt td,.rich table.mt th{border:1px solid var(--line);padding:4px 10px;min-width:56px;vertical-align:top}
 .rich table.mt tr:first-child td{background:var(--surface-2);font-weight:600}

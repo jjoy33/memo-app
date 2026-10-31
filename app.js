@@ -361,7 +361,7 @@ async function uploadFiles(memoId, items, onEach) {
 const SZ = ["sz-s", "sz-m", "sz-l", "sz-xl"];
 const CL = ["c-def", "c-red", "c-orange", "c-green", "c-blue", "c-purple", "c-gray"];
 const HL = ["hl-none", "hl-yellow", "hl-green", "hl-pink"];
-const OK_CLASS = new Set([...SZ, ...CL, ...HL, "mt"]);
+const OK_CLASS = new Set([...SZ, ...CL, ...HL, "mt", "lc"]);   // lc: 공유로 저장한 링크 카드 (v5.19)
 const SIZES = [["sz-s", "작게"], ["sz-m", "보통"], ["sz-l", "크게"], ["sz-xl", "아주 크게"]];
 const COLORS = [["c-def", "기본색"], ["c-red", "빨강"], ["c-orange", "주황"], ["c-green", "초록"], ["c-blue", "파랑"], ["c-purple", "보라"], ["c-gray", "회색"]];
 const HLS = [["hl-none", "형광펜 없음"], ["hl-yellow", "노랑 형광펜"], ["hl-green", "연두 형광펜"], ["hl-pink", "분홍 형광펜"]];
