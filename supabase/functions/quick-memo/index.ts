@@ -126,9 +126,19 @@ Deno.serve(async (req) => {
     if (f instanceof File && f.size) { bytes = new Uint8Array(await f.arrayBuffer()); type = f.type || "image/png"; }
     note = String(fd.get("text") || fd.get("url") || "");
     extraTag = String(fd.get("tag") || extraTag);
+    console.log("multipart", { keys: [...fd.keys()], fileType: f instanceof File ? f.type : null });
   } else if (type.startsWith("application/json")) {
-    const b = await req.json().catch(() => ({}));
-    note = String(b.text ?? b.url ?? ""); extraTag = String(b.tag || extraTag);
+    const raw = await req.text();
+    let b: any = {};
+    try { b = JSON.parse(raw); } catch { note = raw; }
+    // 단축어가 키 이름을 다르게 보내거나 목록·사전으로 감싸 보내도 글자를 모두 모아 씀
+    const pick = (v: unknown): string[] => typeof v === "string" ? [v] : typeof v === "number" ? [String(v)]
+      : Array.isArray(v) ? v.flatMap(pick) : v && typeof v === "object" ? Object.entries(v).filter(([k]) => k !== "tag").flatMap(([, x]) => pick(x)) : [];
+    if (b && typeof b === "object") {
+      note = note || pick(b.text ?? b.url ?? b).join("\n");
+      extraTag = String(b.tag || extraTag);
+    }
+    console.log("json body", { len: raw.length, keys: b && typeof b === "object" ? Object.keys(b) : typeof b, noteLen: note.length });
   } else if (type.startsWith("text/")) {
     note = await req.text();
   } else {
@@ -191,7 +201,8 @@ Deno.serve(async (req) => {
     body = note;
     tags.push(KAKAO_COPY.test(note) ? "카톡" : "발췌"); kind = tags[0];
   } else {
-    return json({ ok: false, error: "보낸 내용이 비어 있습니다" }, 400);
+    console.log("empty input", { contentType: type });
+    return json({ ok: false, error: "보낸 내용이 비어 있습니다 (" + type + ")" }, 400);
   }
 
   const et = cleanTag(extraTag);
