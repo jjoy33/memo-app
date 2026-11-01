@@ -89,6 +89,24 @@ async function preview(url: string): Promise<Preview> {
   }
   return out;
 }
+// 인스타는 제목에 본문이 붙어 오고, 설명에 좋아요 수·계정·날짜·본문이 한꺼번에 옵니다 → 제목/설명을 나눠 정리
+const MONTHS: Record<string, number> = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
+function igDate(s: string) {
+  let m = s.match(/([A-Za-z]+) (\d{1,2}), (\d{4})/);
+  if (m && MONTHS[m[1].toLowerCase()]) return `${m[3]}.${pad(MONTHS[m[1].toLowerCase()])}.${pad(+m[2])}`;
+  m = s.match(/(\d{4})년 ?(\d{1,2})월 ?(\d{1,2})일/);
+  return m ? `${m[1]}.${pad(+m[2])}.${pad(+m[3])}` : "";
+}
+function tidyInstagram(p: Preview): Preview {
+  let name = p.title.replace(/^Instagram의\s*/, "").replace(/\s*on Instagram.*$/s, "").replace(/\s*:\s*["“].*$/s, "").trim();
+  if (/^instagram$/i.test(name)) name = "";
+  let user = "", date = "", text = p.desc;
+  const m = p.desc.match(/^([^\n]*?) - ([\w.]+) (?:- |on )([^:]{4,40}):\s*["“]([\s\S]*?)["”]\.?\s*$/);
+  if (m) { user = m[2]; date = igDate(m[3]); text = m[4]; }
+  else text = text.replace(/^[\d,.]+[KkMm]? (likes?|좋아요)[^-]*-\s*/, "");
+  const head = [name || (user ? "@" + user : ""), name && user ? `(@${user})` : ""].filter(Boolean).join(" ");
+  return { ...p, title: [head, date].filter(Boolean).join(" · ") || "Instagram", desc: text.trim() };
+}
 async function grabImage(url: string): Promise<{ bytes: Uint8Array; type: string } | null> {
   try {
     const res = await fetchWithTimeout(url, "Mozilla/5.0", 7000);
@@ -171,7 +189,8 @@ Deno.serve(async (req) => {
     /* ② 링크 (주소 하나, 또는 짧은 설명 + 주소 — 인스타·유튜브 공유가 보통 이 형태) */
     const url = note.match(URL_ANY)![0].replace(/[),.]+$/, "");
     const extra = note.replace(url, "").trim();
-    const p = await preview(url);
+    let p = await preview(url);
+    if (sourceTag(url) === "인스타" && (p.title || p.desc)) p = tidyInstagram(p);
     let img = "";
     if (p.image) {
       const g = await grabImage(p.image);
@@ -185,7 +204,7 @@ Deno.serve(async (req) => {
         }
       }
     }
-    const t = p.title.slice(0, 200), d = p.desc.slice(0, 400);
+    const t = p.title.slice(0, 200), d = p.desc.slice(0, 2000);
     html = (extra ? `<div>${esc(extra).replace(/\n/g, "<br>")}</div>` : "") +
       `<blockquote class="lc">` +
       (t ? `<div><b>${esc(t)}</b></div>` : "") +
