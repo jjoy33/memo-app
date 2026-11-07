@@ -298,6 +298,9 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .view-tab.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 3px rgba(10,20,30,.12)}
 .view-n{display:inline-block;min-width:20px;padding:1px 6px;margin-left:4px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-family:var(--mono)}
 .view-n:empty{display:none}
+.view-n.n-plain{background:var(--surface-2);color:var(--muted);cursor:default}   /* 인스타 탭: 개수만 표시 (v5.20) */
+.view-n.n-plain:hover{transform:none;box-shadow:none}
+@media (max-width:420px){.view-tab{padding:8px 3px;font-size:13.5px;white-space:nowrap;letter-spacing:-.02em}.view-n{margin-left:2px;padding:1px 5px}}
 .tag-bar.off-view{display:none!important}
 .idea-bar .add{border-style:dashed;color:var(--muted)}
 .idea-bar .add.strong{border-style:solid;border-color:var(--accent);color:var(--accent)}
