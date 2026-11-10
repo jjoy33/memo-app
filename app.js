@@ -735,7 +735,7 @@ function setTagFilter(t) {
 }
 function renderTagBar() {
   const pool = view === "ideas" ? memos : viewMemos();
-  const tags = allTags(pool).filter(([t]) => t.toLowerCase() !== KAKAO && !(view === "insta" && t.toLowerCase() === INSTA)), bar = $("#tagBar"), active = query.startsWith("#") ? query.slice(1).toLowerCase() : "";
+  const tags = allTags(pool).filter(([t]) => t.toLowerCase() !== KAKAO && !(VIEW_TAG[view] && t.toLowerCase() === VIEW_TAG[view].toLowerCase())), bar = $("#tagBar"), active = query.startsWith("#") ? query.slice(1).toLowerCase() : "";
   const nf = pool.filter(hasFile).length;
   bar.hidden = !tags.length && !nf;
   bar.innerHTML = (nf ? `<button type="button" class="tag-filter file-filter${fileOnly ? " on" : ""}" data-files="1" aria-pressed="${fileOnly}">📎 파일 있는 메모<span>${nf}</span></button>` : "") + tags.map(([t, n]) => `<button type="button" class="tag-filter${active === t.toLowerCase() ? " on" : ""}" data-tag="${esc(t)}" aria-pressed="${active === t.toLowerCase()}">#${esc(t)}<span>${n}</span></button>`).join("");
@@ -887,7 +887,7 @@ form.addEventListener("submit", async (e) => {
     return;
   }
   const vTag = VIEW_TAG[view];
-  if (vTag && !cTags.some((t) => t.toLowerCase() === vTag)) cTags.push(vTag);
+  if (vTag && !cTags.some((t) => t.toLowerCase() === vTag.toLowerCase())) cTags.push(vTag);
   const row = { id, user_id: uid, title, body, html, todo: cTodo, done: false, pinned: cPin, attachments, tags: cTags.slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
@@ -1036,10 +1036,15 @@ const isKakao = (m) => memoTags(m).some((t) => t.toLowerCase() === KAKAO);
 // 인스타 탭 (v5.20): #인스타 태그가 붙은 메모(공유 단축어로 저장한 인스타 링크 포함)를 따로 모읍니다
 const INSTA = "인스타";
 const isInsta = (m) => !isKakao(m) && memoTags(m).some((t) => t.toLowerCase() === INSTA);
-const viewOf = (m) => isKakao(m) ? "kakao" : isInsta(m) ? "insta" : "memo";
-const VIEW_TAG = { kakao: KAKAO, insta: INSTA };
-const VIEW_NAME = { memo: "메모", kakao: "카톡정리", insta: "인스타", ideas: "소재" };
-const isMemoView = (v) => v === "memo" || v === "kakao" || v === "insta";
+// 프롬프트·MCP 탭 (v5.21): 카톡정리에서 모은 #프롬프트모음, #MCP스킬추천 메모를 따로 모읍니다 (#카톡정리 태그가 함께 있어도 이 탭이 먼저)
+const PROMPT = "프롬프트모음", MCP = "mcp스킬추천";
+const hasTag = (m, t) => memoTags(m).some((x) => x.toLowerCase() === t);
+const isPrompt = (m) => hasTag(m, PROMPT);
+const isMcp = (m) => !isPrompt(m) && hasTag(m, MCP);
+const viewOf = (m) => isPrompt(m) ? "prompt" : isMcp(m) ? "mcp" : isKakao(m) ? "kakao" : isInsta(m) ? "insta" : "memo";
+const VIEW_TAG = { kakao: KAKAO, insta: INSTA, prompt: "프롬프트모음", mcp: "MCP스킬추천" };
+const VIEW_NAME = { memo: "메모", kakao: "카톡정리", insta: "인스타", prompt: "프롬프트", mcp: "MCP·스킬", ideas: "소재" };
+const isMemoView = (v) => v === "memo" || v === "kakao" || v === "insta" || v === "prompt" || v === "mcp";
 const viewMemos = () => memos.filter((m) => viewOf(m) === view);   // 메모·카톡정리·인스타 탭을 나눔
 const hasFile = (m) => (m.attachments || []).some((a) => !a.inline);
 function render() {
@@ -1054,6 +1059,8 @@ function render() {
   $("#accUsage").textContent = "첨부 " + fmtSize(used) + " / " + fmtSize(STORAGE_CAP);
   const el = $("#list");
   if (!pool.length) el.innerHTML = kk ? '<div class="empty"><strong>아직 카톡정리가 없습니다</strong>매일 아침 단톡방 정리 결과가 여기에 쌓입니다. #카톡정리 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
+    : view === "prompt" ? '<div class="empty"><strong>아직 모은 프롬프트가 없습니다</strong>카톡정리에서 나온 프롬프트가 여기에 쌓입니다. #프롬프트모음 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
+    : view === "mcp" ? '<div class="empty"><strong>아직 모은 MCP·스킬 추천이 없습니다</strong>카톡정리에서 나온 MCP·스킬 추천이 여기에 쌓입니다. #MCP스킬추천 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
     : view === "insta" ? '<div class="empty"><strong>아직 저장한 인스타가 없습니다</strong>인스타 게시물에서 공유 → "메모앱에 저장"을 누르면 여기에 쌓입니다. #인스타 태그가 붙은 메모도 이 탭으로 옵니다.</div>'
     : '<div class="empty"><strong>아직 메모가 없습니다</strong>위 입력창에 적거나 이미지·파일을 붙여넣으면 날짜와 시간이 함께 기록됩니다.</div>';
   else if (!list.length && onlyNew) el.innerHTML = `<div class="empty"><strong>안 읽은 카톡정리가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">전체 보기</button></div>`;
@@ -1591,15 +1598,18 @@ function syncViewChrome() {
   $("#composer").hidden = ideasView;
   $("#tagBar").classList.toggle("off-view", ideasView);
   $("#ideaBar").hidden = !ideasView;
-  [["#tabMemo", "memo"], ["#tabIdeas", "ideas"], ["#tabKakao", "kakao"], ["#tabInsta", "insta"]].forEach(([sel, v]) => { $(sel).classList.toggle("on", view === v); $(sel).setAttribute("aria-selected", view === v); });
-  const fresh = memos.filter((m) => isKakao(m) && isFreshKakao(m)).length;
+  [["#tabMemo", "memo"], ["#tabIdeas", "ideas"], ["#tabKakao", "kakao"], ["#tabInsta", "insta"], ["#tabPrompt", "prompt"], ["#tabMcp", "mcp"]].forEach(([sel, v]) => { $(sel).classList.toggle("on", view === v); $(sel).setAttribute("aria-selected", view === v); });
+  const fresh = memos.filter((m) => viewOf(m) === "kakao" && isFreshKakao(m)).length;
   $("#kakaoCount").textContent = fresh ? String(fresh) : "";
-  $("#cBody").dataset.ph = view === "kakao" ? "카톡정리 결과를 붙여넣으세요" : view === "insta" ? "인스타 링크나 글을 붙여넣으세요 (#인스타 자동)" : "적거나, 이미지·파일을 붙여넣으세요";
+  $("#cBody").dataset.ph = view === "kakao" ? "카톡정리 결과를 붙여넣으세요" : view === "insta" ? "인스타 링크나 글을 붙여넣으세요 (#인스타 자동)" : view === "prompt" ? "프롬프트를 붙여넣으세요 (#프롬프트모음 자동)" : view === "mcp" ? "MCP·스킬 추천을 붙여넣으세요 (#MCP스킬추천 자동)" : "적거나, 이미지·파일을 붙여넣으세요";
   const ni = memos.filter(isInsta).length;
   $("#instaCount").textContent = ni ? String(ni) : "";
+  const np = memos.filter(isPrompt).length, nm = memos.filter(isMcp).length;
+  $("#promptCount").textContent = np ? String(np) : "";
+  $("#mcpCount").textContent = nm ? String(nm) : "";
   const active = ideas.filter((x) => !x.used).length;
   $("#ideaCount").textContent = ideas.length ? String(active) : "";
-  $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : view === "insta" ? "인스타 검색 (#태그)" : "메모·파일 이름 검색 (#태그)";
+  $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : view === "insta" ? "인스타 검색 (#태그)" : view === "prompt" ? "프롬프트 검색 (#태그)" : view === "mcp" ? "MCP·스킬 검색 (#태그)" : "메모·파일 이름 검색 (#태그)";
 }
 // 숫자 배지를 누르면 '아직 안 본 것'만: 소재함 = 아직 안 쓴 소재, 카톡정리 = 아직 읽음 표시 안 한 정리
 var ideaOnlyNew = false, kakaoOnlyNew = false;
@@ -1611,9 +1621,12 @@ function setView(v, keepFilter) {
   query = ""; $("#q").value = "";
   if (ideaInline) finishIdeaInline(true);
   view = v; fileOnly = false; hideIdeaFab(); window.scrollTo({ top: 0 }); render();
+  const on = document.querySelector(".view-tab.on"); if (on) on.scrollIntoView({ block: "nearest", inline: "nearest" });   // 좁은 화면: 고른 탭이 보이게
 }
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabInsta").addEventListener("click", () => setView("insta"));
+$("#tabPrompt").addEventListener("click", () => setView("prompt"));
+$("#tabMcp").addEventListener("click", () => setView("mcp"));
 $("#tabIdeas").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { ideaOnlyNew = true; ideaBox = ""; setView("ideas", true); toast("아직 안 쓴 소재만 보여 줍니다"); } else setView("ideas"); });
 $("#tabKakao").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { kakaoOnlyNew = true; setView("kakao", true); toast("안 읽은 정리만 보여 줍니다"); } else setView("kakao"); });
 document.addEventListener("click", (e) => {
@@ -1622,7 +1635,7 @@ document.addEventListener("click", (e) => {
   if (view === "ideas") ideaOnlyNew = on; else kakaoOnlyNew = on;
   render();
 });
-["#tabMemo", "#tabIdeas", "#tabKakao", "#tabInsta"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
+["#tabMemo", "#tabIdeas", "#tabKakao", "#tabInsta", "#tabPrompt", "#tabMcp"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
 function renderIdeas() {
