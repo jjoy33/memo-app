@@ -89,7 +89,7 @@
       <span class="hint" id="cHint"></span>
       <button type="submit" class="save" id="cSave" disabled>저장</button>
     </div>
-    <div class="c-idea-row" id="cIdeaRow" hidden><span class="c-idea-label">소재함에 바로 보관 (여러 개 선택 가능) →</span><span class="c-idea-boxes" id="cIdeaBoxes"></span></div>
+    <div class="c-idea-row" id="cIdeaRow" hidden><span class="c-idea-label">소재함에 바로 보관 (여러 개 선택 가능 · '탭'은 그 탭에 메모로) →</span><span class="c-idea-boxes" id="cIdeaBoxes"></span></div>
     <div class="tag-row" id="cTagRow"><span class="tag-chips" id="cTagChips"></span><input class="tag-input" id="cTagInput" type="text" placeholder="# 태그 추가" list="tagList" maxlength="30" enterkeyhint="done" aria-label="태그 추가"></div>
     <div id="cTools"></div>
     <input type="file" id="fileInput" multiple hidden>
@@ -165,6 +165,9 @@
   <div class="dlg-field"><span>다른 함으로</span><div class="move-list" id="moveBoxes"></div></div>
   <div class="dlg-field"><span>메모 목록으로</span>
     <button type="button" class="move-opt to-memo" id="moveToMemo">메모로 되돌리기 <small>소재함에서는 빠지고 새 메모가 됩니다</small></button></div>
+  <div class="dlg-field"><span>프롬프트·MCP·스킬 탭으로</span><div class="move-list" id="moveToTabs">
+    <button type="button" class="move-opt to-memo" data-tabto="프롬프트">프롬프트 탭 <small>#프롬프트모음 메모가 됩니다</small></button>
+    <button type="button" class="move-opt to-memo" data-tabto="MCP·스킬">MCP·스킬 탭 <small>#MCP스킬추천 메모가 됩니다</small></button></div></div>
   <div class="dlg-row"><button type="button" class="btn" id="moveCancel">닫기</button></div>
 </dialog>
 

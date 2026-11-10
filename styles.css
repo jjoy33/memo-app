@@ -483,3 +483,7 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 .idea.inline .idea-main{flex-basis:100%}
 .idea.inline .idea-actions{flex-direction:row-reverse;align-items:center;justify-content:space-between;width:100%}
 .idea-ed-body{min-height:4.8em}
+
+/* v5.22: 소재 보관 시 프롬프트·MCP·스킬 탭으로 보내는 칩 */
+.chip.tab-box{border-style:dashed}
+.chip.tab-box[aria-pressed="true"]{border-style:solid}

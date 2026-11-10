@@ -772,7 +772,23 @@ $("#cPin").onclick = function () { cPin = !cPin; this.setAttribute("aria-pressed
 // 소재: 켜고 저장하면 메모 대신 소재함에 바로 보관
 // 함은 여러 개 고를 수 있습니다. 고른 함마다 같은 소재가 하나씩 들어갑니다.
 const lastBoxes = () => { const a = lsGet("memo-last-boxes", null); return Array.isArray(a) && a.length ? a : [lsGet("memo-last-box", "블로그 소재")]; };
-const keepBoxes = (arr) => { const all = allBoxes(), a = arr.filter((b) => all.includes(b)); return a.length ? a : [all[0]]; };
+// v5.22: 소재로 보관할 때 '프롬프트'·'MCP·스킬'을 고르면 소재함이 아니라 그 탭에 메모로 저장합니다 (같은 내용은 한 곳에)
+const TAB_BOX = { "프롬프트": "프롬프트모음", "MCP·스킬": "MCP스킬추천" };
+const TAB_VIEW = { "프롬프트": "prompt", "MCP·스킬": "mcp" };
+const isTabBox = (b) => Object.prototype.hasOwnProperty.call(TAB_BOX, b);
+const keepBoxes = (arr, withTabs) => { const all = allBoxes(), a = arr.filter((b) => all.includes(b) || (withTabs && isTabBox(b))); return a.length ? a : [all[0]]; };
+const tabChips = (picked, attr) => Object.keys(TAB_BOX).map((b) => `<button type="button" class="chip tab-box" aria-pressed="${picked.includes(b)}" ${attr}="${esc(b)}" title="소재함 대신 ${esc(b)} 탭에 메모로 저장">${picked.includes(b) ? "✓ " : "→ "}${esc(b)} 탭</button>`).join("");
+// 소재 대신 프롬프트·MCP·스킬 탭에 메모를 만듭니다. 만든 메모 id를 돌려줍니다.
+function memoToTab(b, { title = "", body = "", html = "", attachments = [], tags = [] }) {
+  const now = new Date().toISOString(), id = newId(), tag = TAB_BOX[b];
+  const tg = tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()).concat(tag);
+  const row = { id, user_id: uid, title, body, html: html || plainToHtml(body), tags: tg, todo: false, done: false, pinned: false, attachments: attachments.slice(), history: [], created_at: now, updated_at: now };
+  memos.unshift({ ...row, _local: true }); saveCache();
+  queue({ op: "upsert", row, isNew: true });
+  return id;
+}
+function undoTabMemos(ids) { if (!ids.length) return; memos = memos.filter((m) => !ids.includes(m.id)); saveCache(); ids.forEach((id) => queue({ op: "delete", id, paths: [] })); }
+const savedLabel = (ib, tb) => [ib.length ? boxLabel(ib) + "에 소재로" : "", tb.length ? tb.map((b) => `'${b}' 탭`).join("·") + "에 메모로" : ""].filter(Boolean).join(", ");
 function toggleBox(arr, b) {
   if (!arr.includes(b)) return arr.concat(b);
   if (arr.length === 1) { toast("함을 하나 이상 골라주세요"); return arr; }
@@ -785,8 +801,8 @@ function renderCIdea() {
   $("#cIdeaRow").hidden = !cIdea;
   $("#cSave").textContent = cIdea ? "보관" : "저장";
   if (!cIdea) return;
-  const boxes = allBoxes(); cIdeaBoxes = keepBoxes(cIdeaBoxes);
-  $("#cIdeaBoxes").innerHTML = boxes.map((b) => `<button type="button" class="chip" aria-pressed="${cIdeaBoxes.includes(b)}" data-cbox="${esc(b)}">${cIdeaBoxes.includes(b) ? "✓ " : ""}${esc(b)}</button>`).join("");
+  const boxes = allBoxes(); cIdeaBoxes = keepBoxes(cIdeaBoxes, true);
+  $("#cIdeaBoxes").innerHTML = boxes.map((b) => `<button type="button" class="chip" aria-pressed="${cIdeaBoxes.includes(b)}" data-cbox="${esc(b)}">${cIdeaBoxes.includes(b) ? "✓ " : ""}${esc(b)}</button>`).join("") + tabChips(cIdeaBoxes, "data-cbox");
 }
 $("#cIdea").onclick = () => { cIdea = !cIdea; renderCIdea(); };
 $("#cIdeaBoxes").addEventListener("click", (e) => { const b = e.target.closest("[data-cbox]"); if (!b) return; cIdeaBoxes = toggleBox(cIdeaBoxes, b.dataset.cbox); renderCIdea(); });
@@ -875,14 +891,17 @@ form.addEventListener("submit", async (e) => {
     // 서식·이미지·영상·표·파일도 소재에 그대로 담습니다 (메모를 따로 만들지 않음)
     const plain = !cBody.querySelector("img, video, table, hr, span[class], b, strong, ul, ol");
     const ihtml = plain ? "" : (title ? "<p><b>" + esc(title) + "</b></p>" : "") + html + (tagLine ? "<p>" + esc(tagLine) + "</p>" : "");
-    cIdeaBoxes.forEach((bx) => {
+    const ib = cIdeaBoxes.filter((b) => !isTabBox(b)), tb = cIdeaBoxes.filter(isTabBox);
+    ib.forEach((bx) => {
       const x = { id: newId(), user_id: uid, memo_id: null, box: bx, text, note: "", html: ihtml, attachments: attachments.slice(), used: false, created_at: now, updated_at: now };
       ideas.unshift(x); saveIdea(x, {});
     });
-    lsSet("memo-last-box", cIdeaBoxes[0]); lsSet("memo-last-boxes", cIdeaBoxes);
-    const bs = cIdeaBoxes.slice();
+    tb.forEach((b) => memoToTab(b, { title, body, html, attachments, tags: cTags }));
+    if (ib.length) lsSet("memo-last-box", ib[0]);
+    lsSet("memo-last-boxes", cIdeaBoxes);
+    const bs = ib.slice();
     resetComposer(); render();
-    toast(`${boxLabel(bs)}에 소재로 보관했습니다`, "소재함 보기", () => { ideaBox = bs[0]; setView("ideas"); });
+    toast(`${savedLabel(ib, tb)} 보관했습니다`, ib.length ? "소재함 보기" : "보기", () => { if (ib.length) { ideaBox = bs[0]; setView("ideas"); } else setView(TAB_VIEW[tb[0]]); });
     if (fine) cBody.focus();
     return;
   }
@@ -1866,24 +1885,26 @@ $("#moveBoxes").addEventListener("click", (e) => {
   moveDlg.close(); render();
   toast(`'${to}'(으)로 옮겼습니다`, "되돌리기", () => { saveIdea(x, { box: from, updated_at: new Date().toISOString() }); render(); toast("원래 함으로 되돌렸습니다"); });
 });
-$("#moveToMemo").addEventListener("click", () => {
+function ideaToMemo(tabB) {
   const x = moveTarget; if (!x) return;
   const now = new Date().toISOString(), id = newId();
   const body = x.text + (x.note ? "\n\n" + x.note : "");
   const html = ideaRich(x) ? clean(x.html) + (x.note ? "<p><br></p><p>" + esc(x.note) + "</p>" : "") : plainToHtml(body);
-  const row = { id, user_id: uid, title: "", body, html, tags: [], todo: false, done: false, pinned: false, attachments: (x.attachments || []).slice(), history: [], created_at: now, updated_at: now };
+  const row = { id, user_id: uid, title: "", body, html, tags: tabB ? [TAB_BOX[tabB]] : [], todo: false, done: false, pinned: false, attachments: (x.attachments || []).slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
   ideas = ideas.filter((i) => i.id !== x.id); saveIdeas();
   ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); commitIdeaDelete(x); }, 7000) });
   moveDlg.close(); render();
-  toast("메모 목록으로 옮겼습니다", "되돌리기", () => {
+  toast(tabB ? `'${tabB}' 탭으로 옮겼습니다` : "메모 목록으로 옮겼습니다", "되돌리기", () => {
     const p = ideaDeletes.get(x.id); if (p) { clearTimeout(p.timer); ideaDeletes.delete(x.id); }
     ideas.push(x); saveIdeas();
     memos = memos.filter((m) => m.id !== id); saveCache(); queue({ op: "delete", id, paths: [] });
     render(); toast("옮기기 전으로 되돌렸습니다");
   }, 7000);
-});
+}
+$("#moveToMemo").addEventListener("click", () => ideaToMemo(""));
+$("#moveToTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tabto]"); if (b) ideaToMemo(b.dataset.tabto); });
 
 /* 메모에서 문장을 드래그하면 '소재로 보관' 버튼 */
 const ideaFab = $("#ideaFab");
@@ -1929,7 +1950,7 @@ function writeNewIdea() {
 }
 function openIdeaDlg(st) {
   dlgState = st;
-  dlgState.boxes = keepBoxes(st.mode === "edit" ? [st.idea.box] : ideaBox ? [ideaBox] : lastBoxes());
+  dlgState.boxes = keepBoxes(st.mode === "edit" ? [st.idea.box] : ideaBox ? [ideaBox] : lastBoxes(), st.mode === "new");
   dlgState.box = dlgState.boxes[0];
   $("#ideaDlgTitle").textContent = st.mode === "edit" ? "소재 수정" : st.mode === "box" ? "새 소재함 만들기" : st.text ? "소재로 보관" : "소재 직접 쓰기";
   st.rich = st.mode === "edit" && (ideaRich(st.idea) || (st.idea.attachments || []).length > 0);   // 사진·서식이 있는 소재는 글을 카드에서 바로 고칩니다
@@ -1953,7 +1974,8 @@ function openIdeaDlg(st) {
 }
 function renderBoxPick() {
   $("#ideaBoxPick").innerHTML = allBoxes().map((b) => `<button type="button" class="chip" aria-pressed="${dlgState.mode === "box" ? dlgState.box === b : dlgState.boxes.includes(b)}" data-pick="${esc(b)}">${dlgState.mode !== "box" && dlgState.boxes.includes(b) ? "✓ " : ""}${esc(b)}</button>`).join("") +
-    `<button type="button" class="chip add" data-pick="__new">+ 새 함</button>`;
+    `<button type="button" class="chip add" data-pick="__new">+ 새 함</button>` +
+    (dlgState.mode === "edit" || dlgState.mode === "box" ? "" : tabChips(dlgState.boxes, "data-pick"));
 }
 $("#ideaBoxPick").addEventListener("click", (e) => {
   const b = e.target.closest("[data-pick]"); if (!b) return;
@@ -1976,8 +1998,9 @@ $("#ideaSave").addEventListener("click", () => {
   const text = st.rich ? st.idea.text : $("#ideaText").value.trim(), note = $("#ideaNote").value.trim();
   if (!text && !st.rich) { toast("소재 내용을 적어주세요"); $("#ideaText").focus(); return; }
   const now = new Date().toISOString();
-  const bs = st.boxes.slice();
-  lsSet("memo-last-box", bs[0]);
+  const tb = st.mode === "edit" ? [] : st.boxes.filter(isTabBox);
+  const bs = st.boxes.filter((b) => !isTabBox(b));
+  if (bs.length) lsSet("memo-last-box", bs[0]);
   if (st.mode === "edit") {
     // 원래 함이 남아 있으면 그대로 두고, 새로 고른 함에는 같은 소재를 복사해 넣습니다
     const keep = bs.includes(st.idea.box) ? st.idea.box : bs[0];
@@ -1986,8 +2009,9 @@ $("#ideaSave").addEventListener("click", () => {
     extra.forEach((b) => { const y = { id: newId(), user_id: uid, memo_id: st.idea.memo_id || null, box: b, text, note, html: st.idea.html || "", attachments: (st.idea.attachments || []).slice(), used: false, created_at: now, updated_at: now }; ideas.unshift(y); saveIdea(y, {}); });
     ideaDlg.close(); render(); toast(extra.length ? `소재를 수정하고 ${boxLabel(extra)}에도 넣었습니다` : "소재를 수정했습니다"); return;
   }
-  lsSet("memo-last-boxes", bs);
+  lsSet("memo-last-boxes", st.boxes);
   const moving = st.fromMemo && $("#ideaMove").checked;
+  const tabIds = tb.map((b) => memoToTab(b, { body: text + (note ? "\n\n" + note : "") }));
   const made = bs.map((b) => ({ id: newId(), user_id: uid, memo_id: moving ? null : (st.memoId || null), box: b, text, note, used: false, created_at: now, updated_at: now }));
   made.slice().reverse().forEach((y) => ideas.unshift(y)); made.forEach((y) => saveIdea(y, {}));
   ideaDlg.close();
@@ -1998,7 +2022,8 @@ $("#ideaSave").addEventListener("click", () => {
       memos = memos.filter((y) => y.id !== mm.id); saveCache();
       pendingDeletes.set(mm.id, { memo: mm, timer: setTimeout(() => commitDelete(mm.id), 7000) });
       render();
-      toast(`${boxLabel(bs)}(으)로 옮겼습니다`, "되돌리기", () => {
+      toast(`${savedLabel(bs, tb)} 옮겼습니다`, "되돌리기", () => {
+        undoTabMemos(tabIds);
         const p = pendingDeletes.get(mm.id);
         if (p) { clearTimeout(p.timer); pendingDeletes.delete(mm.id); memos.push(p.memo); memos.sort((a, b) => ms(b.created_at) - ms(a.created_at)); saveCache(); }
         const gone = new Set(made.map((y) => y.id));
@@ -2009,7 +2034,8 @@ $("#ideaSave").addEventListener("click", () => {
     }
   }
   render();
-  toast(`${boxLabel(bs)}에 보관했습니다`, view !== "ideas" ? "소재함 보기" : null, () => { ideaBox = bs[0]; setView("ideas"); });
+  if (!bs.length) { toast(`${savedLabel(bs, tb)} 보관했습니다`, "보기", () => setView(TAB_VIEW[tb[0]])); return; }
+  toast(`${savedLabel(bs, tb)} 보관했습니다`, view !== "ideas" ? "소재함 보기" : null, () => { ideaBox = bs[0]; setView("ideas"); });
 });
 
 /* ---------------- 맨 위로 버튼 ---------------- */
