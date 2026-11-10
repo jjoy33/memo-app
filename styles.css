@@ -300,8 +300,15 @@ dialog h2{margin:0 0 8px;font-size:17px}
 .view-n:empty{display:none}
 .view-n.n-plain{background:var(--surface-2);color:var(--muted);cursor:default}   /* 인스타 탭: 개수만 표시 (v5.20) */
 .view-n.n-plain:hover{transform:none;box-shadow:none}
-/* 탭이 6개라 좁은 화면에서는 옆으로 밀어서 봅니다 (v5.21) */
-@media (max-width:640px){.views{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}.views::-webkit-scrollbar{display:none}.view-tab{flex:0 0 auto;white-space:nowrap}}
+/* v5.23: 좁은 화면에서는 옆으로 밀지 않고 4칸씩 두 줄로 모두 보이게 합니다 */
+.tab-cfg-btn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;padding:8px}
+.tab-cfg-btn svg{width:18px;height:18px}
+@media (max-width:640px){
+  .views{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+  .view-tab{padding:7px 2px;font-size:13px;letter-spacing:-.03em;display:flex;align-items:center;justify-content:center;gap:2px;min-width:0}
+  .view-tab .tab-name{overflow:hidden;text-overflow:ellipsis}
+  .view-n{margin-left:0;padding:0 5px;font-size:11px;min-width:16px}
+}
 @media (max-width:420px){.view-tab{padding:8px 3px;font-size:13.5px;white-space:nowrap;letter-spacing:-.02em}.view-n{margin-left:2px;padding:1px 5px}}
 .tag-bar.off-view{display:none!important}
 .idea-bar .add{border-style:dashed;color:var(--muted)}
@@ -487,3 +494,15 @@ body.rubbering{user-select:none;-webkit-user-select:none;cursor:crosshair}
 /* v5.22: 소재 보관 시 프롬프트·MCP·스킬 탭으로 보내는 칩 */
 .chip.tab-box{border-style:dashed}
 .chip.tab-box[aria-pressed="true"]{border-style:solid}
+/* v5.23: 탭 순서·이름 설정 창 */
+.tab-dlg{display:none;flex-direction:column;gap:10px}
+.tab-dlg[open]{display:flex}
+.tab-hint{margin:0;font-size:13px;color:var(--muted)}
+.tab-cfg{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.tab-cfg li{display:grid;grid-template-columns:1fr auto auto;grid-template-rows:auto auto;column-gap:6px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:8px 10px;background:var(--surface-2)}
+.tab-cfg input{grid-column:1;grid-row:1;width:100%;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:16px;color:var(--fg);outline:none}
+.tab-cfg input:focus{border-color:var(--accent)}
+.tab-cfg small{grid-column:1;grid-row:2;font-size:12px;color:var(--muted);padding:3px 2px 0}
+.tab-cfg .tab-mv{grid-row:1/3;width:40px;height:40px;padding:0;border-radius:10px;font-size:14px}
+.tab-cfg .tab-mv:disabled{opacity:.3}
+.tab-dlg .sp{flex:1}

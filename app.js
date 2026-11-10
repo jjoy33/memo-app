@@ -26,6 +26,13 @@ const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY,
 
 /* ---------------- 상태 ---------------- */
 let uid = null, memos = [], outbox = [], flushing = false, channel = null;
+// 탭 기본 이름 (v5.23: 순서·이름은 탭 설정에서 바꿀 수 있음)
+const DEFAULT_NAME = { memo: "메모", ideas: "소재함", kakao: "카톡정리", insta: "인스타", prompt: "프롬프트", mcp: "MCP·스킬", tips: "강의꿀팁" };
+const TAB_KEYS = Object.keys(DEFAULT_NAME);
+const TAB_EL = { memo: "#tabMemo", ideas: "#tabIdeas", kakao: "#tabKakao", insta: "#tabInsta", prompt: "#tabPrompt", mcp: "#tabMcp", tips: "#tabTips" };
+let tabCfg = { order: TAB_KEYS.slice(), names: {} };
+const tabName = (k) => (tabCfg.names[k] || "").trim() || DEFAULT_NAME[k];
+const tagTabKeys = () => ["prompt", "mcp", "tips"];
 let editingId = null, editDraft = null, confirmId = null, pendingRender = false;
 let query = "", fileTarget = "composer", fileEd = null, fileOnly = false;
 const urlCache = new Map();   // path -> {url, dl, exp}
@@ -154,6 +161,8 @@ function start(user) {
   memos = lsGet("memo-cache-" + uid, []);
   outbox = lsGet("memo-outbox-" + uid, []);
   ideas = lsGet("memo-ideas-" + uid, []); boxNames = lsGet("memo-boxes-" + uid, []);
+  tabCfg = normTabs((user.user_metadata && user.user_metadata.memo_tabs) || lsGet("memo-tabs-" + uid, null)); applyTabs();
+  sb.auth.getUser().then(({ data }) => { const c = data && data.user && data.user.user_metadata && data.user.user_metadata.memo_tabs; if (c && uid === user.id) { tabCfg = normTabs(c); lsSet("memo-tabs-" + uid, tabCfg); applyTabs(); render(); } }).catch(() => {});
   render(); syncDot();
   load(); subscribe(); flush();
 }
@@ -773,15 +782,15 @@ $("#cPin").onclick = function () { cPin = !cPin; this.setAttribute("aria-pressed
 // 함은 여러 개 고를 수 있습니다. 고른 함마다 같은 소재가 하나씩 들어갑니다.
 const lastBoxes = () => { const a = lsGet("memo-last-boxes", null); return Array.isArray(a) && a.length ? a : [lsGet("memo-last-box", "블로그 소재")]; };
 // v5.22: 소재로 보관할 때 '프롬프트'·'MCP·스킬'을 고르면 소재함이 아니라 그 탭에 메모로 저장합니다 (같은 내용은 한 곳에)
-// 이름은 소재함의 함 이름(예: 기존 '프롬프트' 함)과 겹치지 않게 "… 탭"으로 둡니다
-const TAB_BOX = { "프롬프트 탭": "프롬프트모음", "MCP·스킬 탭": "MCP스킬추천" };
-const TAB_VIEW = { "프롬프트 탭": "prompt", "MCP·스킬 탭": "mcp" };
-const isTabBox = (b) => Object.prototype.hasOwnProperty.call(TAB_BOX, b);
+// 탭 선택지는 "tab:키"로 저장해 소재함의 함 이름(예: 기존 '프롬프트' 함)이나 바꾼 탭 이름과 겹치지 않게 합니다
+const isTabBox = (b) => typeof b === "string" && b.startsWith("tab:") && TAG_TABS.some(([k]) => k === b.slice(4));
+const tabOfBox = (b) => b.slice(4);
 const keepBoxes = (arr, withTabs) => { const all = allBoxes(), a = arr.filter((b) => all.includes(b) || (withTabs && isTabBox(b))); return a.length ? a : [all[0]]; };
-const tabChips = (picked, attr) => Object.keys(TAB_BOX).map((b) => `<button type="button" class="chip tab-box" aria-pressed="${picked.includes(b)}" ${attr}="${esc(b)}" title="소재함 대신 ${esc(b)}에 메모로 저장">${picked.includes(b) ? "✓ " : "→ "}${esc(b)}</button>`).join("");
+const tabChips = (picked, attr) => tabCfg.order.filter((k) => TAG_TABS.some(([t]) => t === k)).map((k) => { const b = "tab:" + k, on = picked.includes(b);
+  return `<button type="button" class="chip tab-box" aria-pressed="${on}" ${attr}="${b}" title="소재함 대신 ${esc(tabName(k))} 탭에 메모로 저장">${on ? "✓ " : "→ "}${esc(tabName(k))} 탭</button>`; }).join("");
 // 소재 대신 프롬프트·MCP·스킬 탭에 메모를 만듭니다. 만든 메모 id를 돌려줍니다.
 function memoToTab(b, { title = "", body = "", html = "", attachments = [], tags = [] }) {
-  const now = new Date().toISOString(), id = newId(), tag = TAB_BOX[b];
+  const now = new Date().toISOString(), id = newId(), tag = VIEW_TAG[tabOfBox(b)];
   const tg = tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()).concat(tag);
   const row = { id, user_id: uid, title, body, html: html || plainToHtml(body), tags: tg, todo: false, done: false, pinned: false, attachments: attachments.slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
@@ -789,7 +798,7 @@ function memoToTab(b, { title = "", body = "", html = "", attachments = [], tags
   return id;
 }
 function undoTabMemos(ids) { if (!ids.length) return; memos = memos.filter((m) => !ids.includes(m.id)); saveCache(); ids.forEach((id) => queue({ op: "delete", id, paths: [] })); }
-const savedLabel = (ib, tb) => [ib.length ? boxLabel(ib) + "에 소재로" : "", tb.length ? tb.map((b) => `'${b}'`).join("·") + "에 메모로" : ""].filter(Boolean).join(", ");
+const savedLabel = (ib, tb) => [ib.length ? boxLabel(ib) + "에 소재로" : "", tb.length ? tb.map((b) => `'${tabName(tabOfBox(b))}' 탭`).join("·") + "에 메모로" : ""].filter(Boolean).join(", ");
 function toggleBox(arr, b) {
   if (!arr.includes(b)) return arr.concat(b);
   if (arr.length === 1) { toast("함을 하나 이상 골라주세요"); return arr; }
@@ -902,7 +911,7 @@ form.addEventListener("submit", async (e) => {
     lsSet("memo-last-boxes", cIdeaBoxes);
     const bs = ib.slice();
     resetComposer(); render();
-    toast(`${savedLabel(ib, tb)} 보관했습니다`, ib.length ? "소재함 보기" : "보기", () => { if (ib.length) { ideaBox = bs[0]; setView("ideas"); } else setView(TAB_VIEW[tb[0]]); });
+    toast(`${savedLabel(ib, tb)} 보관했습니다`, ib.length ? "소재함 보기" : "보기", () => { if (ib.length) { ideaBox = bs[0]; setView("ideas"); } else setView(tabOfBox(tb[0])); });
     if (fine) cBody.focus();
     return;
   }
@@ -913,7 +922,7 @@ form.addEventListener("submit", async (e) => {
   queue({ op: "upsert", row, isNew: true });
   resetComposer();
   const dest = viewOf(row), moved = dest !== view && dest !== "memo";
-  render(); toast(moved ? `#${VIEW_TAG[dest]} 태그가 있어 ${VIEW_NAME[dest]} 탭에 저장했습니다` : "저장했습니다 · " + timeStr(Date.now()),
+  render(); toast(moved ? `#${VIEW_TAG[dest]} 태그가 있어 ${viewName(dest)} 탭에 저장했습니다` : "저장했습니다 · " + timeStr(Date.now()),
     moved ? "보기" : undefined, moved ? () => setView(dest) : undefined);
   if (fine) cBody.focus();
 });
@@ -1056,15 +1065,14 @@ const isKakao = (m) => memoTags(m).some((t) => t.toLowerCase() === KAKAO);
 // 인스타 탭 (v5.20): #인스타 태그가 붙은 메모(공유 단축어로 저장한 인스타 링크 포함)를 따로 모읍니다
 const INSTA = "인스타";
 const isInsta = (m) => !isKakao(m) && memoTags(m).some((t) => t.toLowerCase() === INSTA);
-// 프롬프트·MCP 탭 (v5.21): 카톡정리에서 모은 #프롬프트모음, #MCP스킬추천 메모를 따로 모읍니다 (#카톡정리 태그가 함께 있어도 이 탭이 먼저)
-const PROMPT = "프롬프트모음", MCP = "mcp스킬추천";
+// 태그로 모으는 탭 (v5.21~5.23): 위에 있을수록 먼저 — #카톡정리 태그가 함께 있어도 이 탭으로 갑니다
+const TAG_TABS = [["prompt", "프롬프트모음"], ["mcp", "MCP스킬추천"], ["tips", "강의꿀팁"]];
 const hasTag = (m, t) => memoTags(m).some((x) => x.toLowerCase() === t);
-const isPrompt = (m) => hasTag(m, PROMPT);
-const isMcp = (m) => !isPrompt(m) && hasTag(m, MCP);
-const viewOf = (m) => isPrompt(m) ? "prompt" : isMcp(m) ? "mcp" : isKakao(m) ? "kakao" : isInsta(m) ? "insta" : "memo";
-const VIEW_TAG = { kakao: KAKAO, insta: INSTA, prompt: "프롬프트모음", mcp: "MCP스킬추천" };
-const VIEW_NAME = { memo: "메모", kakao: "카톡정리", insta: "인스타", prompt: "프롬프트", mcp: "MCP·스킬", ideas: "소재" };
-const isMemoView = (v) => v === "memo" || v === "kakao" || v === "insta" || v === "prompt" || v === "mcp";
+const tagTabOf = (m) => { for (const [k, t] of TAG_TABS) if (hasTag(m, t.toLowerCase())) return k; return ""; };
+const viewOf = (m) => tagTabOf(m) || (isKakao(m) ? "kakao" : isInsta(m) ? "insta" : "memo");
+const VIEW_TAG = { kakao: KAKAO, insta: INSTA, ...Object.fromEntries(TAG_TABS) };
+const viewName = (k) => k === "ideas" ? "소재" : tabName(k);
+const isMemoView = (v) => v !== "ideas";
 const viewMemos = () => memos.filter((m) => viewOf(m) === view);   // 메모·카톡정리·인스타 탭을 나눔
 const hasFile = (m) => (m.attachments || []).some((a) => !a.inline);
 function render() {
@@ -1079,8 +1087,7 @@ function render() {
   $("#accUsage").textContent = "첨부 " + fmtSize(used) + " / " + fmtSize(STORAGE_CAP);
   const el = $("#list");
   if (!pool.length) el.innerHTML = kk ? '<div class="empty"><strong>아직 카톡정리가 없습니다</strong>매일 아침 단톡방 정리 결과가 여기에 쌓입니다. #카톡정리 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
-    : view === "prompt" ? '<div class="empty"><strong>아직 모은 프롬프트가 없습니다</strong>카톡정리에서 나온 프롬프트가 여기에 쌓입니다. #프롬프트모음 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
-    : view === "mcp" ? '<div class="empty"><strong>아직 모은 MCP·스킬 추천이 없습니다</strong>카톡정리에서 나온 MCP·스킬 추천이 여기에 쌓입니다. #MCP스킬추천 태그가 붙은 메모는 모두 이 탭으로 옵니다.</div>'
+    : tagTabKeys().includes(view) ? `<div class="empty"><strong>아직 ${esc(tabName(view))} 탭에 모인 글이 없습니다</strong>#${esc(VIEW_TAG[view])} 태그가 붙은 메모는 모두 이 탭으로 옵니다. 소재로 보관할 때 '→ ${esc(tabName(view))} 탭'을 골라도 됩니다.</div>`
     : view === "insta" ? '<div class="empty"><strong>아직 저장한 인스타가 없습니다</strong>인스타 게시물에서 공유 → "메모앱에 저장"을 누르면 여기에 쌓입니다. #인스타 태그가 붙은 메모도 이 탭으로 옵니다.</div>'
     : '<div class="empty"><strong>아직 메모가 없습니다</strong>위 입력창에 적거나 이미지·파일을 붙여넣으면 날짜와 시간이 함께 기록됩니다.</div>';
   else if (!list.length && onlyNew) el.innerHTML = `<div class="empty"><strong>안 읽은 카톡정리가 없습니다</strong><button type="button" class="only-new-off" data-onlynew="off">전체 보기</button></div>`;
@@ -1604,7 +1611,9 @@ async function attachToIdea(files, x) {
 function allBoxes() {
   const set = [];
   [...DEFAULT_BOXES, ...boxNames, ...ideas.map((x) => x.box)].forEach((b) => { if (b && !set.includes(b)) set.push(b); });
-  return set;
+  // 탭으로 옮겨 간 함(예: 강의꿀팁)은 비어 있으면 감춥니다 — 같은 내용이 두 곳에 나뉘지 않게
+  const tabTags = TAG_TABS.map(([, t]) => t.toLowerCase());
+  return set.filter((b) => DEFAULT_BOXES.includes(b) || !tabTags.includes(b.toLowerCase()) || ideas.some((x) => x.box === b));
 }
 const IIC = {
   move: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
@@ -1618,18 +1627,16 @@ function syncViewChrome() {
   $("#composer").hidden = ideasView;
   $("#tagBar").classList.toggle("off-view", ideasView);
   $("#ideaBar").hidden = !ideasView;
-  [["#tabMemo", "memo"], ["#tabIdeas", "ideas"], ["#tabKakao", "kakao"], ["#tabInsta", "insta"], ["#tabPrompt", "prompt"], ["#tabMcp", "mcp"]].forEach(([sel, v]) => { $(sel).classList.toggle("on", view === v); $(sel).setAttribute("aria-selected", view === v); });
+  Object.entries(TAB_EL).forEach(([v, sel]) => { $(sel).classList.toggle("on", view === v); $(sel).setAttribute("aria-selected", view === v); });
   const fresh = memos.filter((m) => viewOf(m) === "kakao" && isFreshKakao(m)).length;
   $("#kakaoCount").textContent = fresh ? String(fresh) : "";
-  $("#cBody").dataset.ph = view === "kakao" ? "카톡정리 결과를 붙여넣으세요" : view === "insta" ? "인스타 링크나 글을 붙여넣으세요 (#인스타 자동)" : view === "prompt" ? "프롬프트를 붙여넣으세요 (#프롬프트모음 자동)" : view === "mcp" ? "MCP·스킬 추천을 붙여넣으세요 (#MCP스킬추천 자동)" : "적거나, 이미지·파일을 붙여넣으세요";
+  $("#cBody").dataset.ph = view === "kakao" ? "카톡정리 결과를 붙여넣으세요" : view === "insta" ? "인스타 링크나 글을 붙여넣으세요 (#인스타 자동)" : tagTabKeys().includes(view) ? `${tabName(view)} 탭에 넣을 글을 붙여넣으세요 (#${VIEW_TAG[view]} 자동)` : "적거나, 이미지·파일을 붙여넣으세요";
   const ni = memos.filter(isInsta).length;
   $("#instaCount").textContent = ni ? String(ni) : "";
-  const np = memos.filter(isPrompt).length, nm = memos.filter(isMcp).length;
-  $("#promptCount").textContent = np ? String(np) : "";
-  $("#mcpCount").textContent = nm ? String(nm) : "";
+  tagTabKeys().forEach((k) => { const n = memos.filter((m) => viewOf(m) === k).length; $("#" + k + "Count").textContent = n ? String(n) : ""; });
   const active = ideas.filter((x) => !x.used).length;
   $("#ideaCount").textContent = ideas.length ? String(active) : "";
-  $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : view === "insta" ? "인스타 검색 (#태그)" : view === "prompt" ? "프롬프트 검색 (#태그)" : view === "mcp" ? "MCP·스킬 검색 (#태그)" : "메모·파일 이름 검색 (#태그)";
+  $("#q").placeholder = ideasView ? "소재 검색" : view === "kakao" ? "카톡정리 검색 (#태그)" : view === "insta" ? "인스타 검색 (#태그)" : tagTabKeys().includes(view) ? `${tabName(view)} 검색 (#태그)` : "메모·파일 이름 검색 (#태그)";
 }
 // 숫자 배지를 누르면 '아직 안 본 것'만: 소재함 = 아직 안 쓴 소재, 카톡정리 = 아직 읽음 표시 안 한 정리
 var ideaOnlyNew = false, kakaoOnlyNew = false;
@@ -1645,8 +1652,8 @@ function setView(v, keepFilter) {
 }
 $("#tabMemo").addEventListener("click", () => setView("memo"));
 $("#tabInsta").addEventListener("click", () => setView("insta"));
-$("#tabPrompt").addEventListener("click", () => setView("prompt"));
-$("#tabMcp").addEventListener("click", () => setView("mcp"));
+tagTabKeys().forEach((k) => $(TAB_EL[k]).addEventListener("click", () => setView(k)));
+$("#tabCfgBtn").addEventListener("click", openTabDlg);
 $("#tabIdeas").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { ideaOnlyNew = true; ideaBox = ""; setView("ideas", true); toast("아직 안 쓴 소재만 보여 줍니다"); } else setView("ideas"); });
 $("#tabKakao").addEventListener("click", (e) => { if (e.target.closest(".view-n")) { kakaoOnlyNew = true; setView("kakao", true); toast("안 읽은 정리만 보여 줍니다"); } else setView("kakao"); });
 document.addEventListener("click", (e) => {
@@ -1655,7 +1662,7 @@ document.addEventListener("click", (e) => {
   if (view === "ideas") ideaOnlyNew = on; else kakaoOnlyNew = on;
   render();
 });
-["#tabMemo", "#tabIdeas", "#tabKakao", "#tabInsta", "#tabPrompt", "#tabMcp"].forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
+Object.values(TAB_EL).forEach((t) => $(t).addEventListener("click", () => { if (typeof clearSel === "function") clearSel(); }, true));
 
 /* 소재함 그리기 */
 function renderIdeas() {
@@ -1876,6 +1883,7 @@ function openMoveDlg(x) {
   $("#moveBoxes").innerHTML = allBoxes().map((b) => b === x.box
     ? `<button type="button" class="move-opt current" disabled>${esc(b)} <small>지금 여기</small></button>`
     : `<button type="button" class="move-opt" data-to="${esc(b)}">${esc(b)}</button>`).join("");
+  $("#moveToTabs").innerHTML = tabCfg.order.filter((k) => tagTabKeys().includes(k)).map((k) => `<button type="button" class="move-opt to-memo" data-tabto="${k}">${esc(tabName(k))} 탭 <small>#${esc(VIEW_TAG[k])} 메모가 됩니다</small></button>`).join("");
   moveDlg.showModal();
 }
 $("#moveCancel").addEventListener("click", () => moveDlg.close());
@@ -1891,13 +1899,13 @@ function ideaToMemo(tabB) {
   const now = new Date().toISOString(), id = newId();
   const body = x.text + (x.note ? "\n\n" + x.note : "");
   const html = ideaRich(x) ? clean(x.html) + (x.note ? "<p><br></p><p>" + esc(x.note) + "</p>" : "") : plainToHtml(body);
-  const row = { id, user_id: uid, title: "", body, html, tags: tabB ? [TAB_BOX[tabB]] : [], todo: false, done: false, pinned: false, attachments: (x.attachments || []).slice(), history: [], created_at: now, updated_at: now };
+  const row = { id, user_id: uid, title: "", body, html, tags: tabB ? [VIEW_TAG[tabB]] : [], todo: false, done: false, pinned: false, attachments: (x.attachments || []).slice(), history: [], created_at: now, updated_at: now };
   memos.unshift({ ...row, _local: true }); saveCache();
   queue({ op: "upsert", row, isNew: true });
   ideas = ideas.filter((i) => i.id !== x.id); saveIdeas();
   ideaDeletes.set(x.id, { idea: x, timer: setTimeout(() => { ideaDeletes.delete(x.id); commitIdeaDelete(x); }, 7000) });
   moveDlg.close(); render();
-  toast(tabB ? `'${tabB}'(으)로 옮겼습니다` : "메모 목록으로 옮겼습니다", "되돌리기", () => {
+  toast(tabB ? `'${tabName(tabB)}' 탭으로 옮겼습니다` : "메모 목록으로 옮겼습니다", "되돌리기", () => {
     const p = ideaDeletes.get(x.id); if (p) { clearTimeout(p.timer); ideaDeletes.delete(x.id); }
     ideas.push(x); saveIdeas();
     memos = memos.filter((m) => m.id !== id); saveCache(); queue({ op: "delete", id, paths: [] });
@@ -2035,8 +2043,54 @@ $("#ideaSave").addEventListener("click", () => {
     }
   }
   render();
-  if (!bs.length) { toast(`${savedLabel(bs, tb)} 보관했습니다`, "보기", () => setView(TAB_VIEW[tb[0]])); return; }
+  if (!bs.length) { toast(`${savedLabel(bs, tb)} 보관했습니다`, "보기", () => setView(tabOfBox(tb[0]))); return; }
   toast(`${savedLabel(bs, tb)} 보관했습니다`, view !== "ideas" ? "소재함 보기" : null, () => { ideaBox = bs[0]; setView("ideas"); });
+});
+
+/* ---------------- 탭 순서·이름 (v5.23) ----------------
+   순서와 이름은 계정 정보(user_metadata)에 저장해 폰·PC가 같은 탭 구성을 씁니다.
+   이름을 바꿔도 탭에 모이는 태그(#프롬프트모음 등)는 그대로입니다. */
+function normTabs(c) {
+  const order = (c && Array.isArray(c.order) ? c.order : []).filter((k, i, a) => TAB_KEYS.includes(k) && a.indexOf(k) === i);
+  TAB_KEYS.forEach((k) => { if (!order.includes(k)) order.push(k); });
+  const names = {};
+  if (c && c.names) TAB_KEYS.forEach((k) => { const n = String(c.names[k] || "").trim().slice(0, 10); if (n && n !== DEFAULT_NAME[k]) names[k] = n; });
+  return { order, names };
+}
+function applyTabs() {
+  const nav = $("#viewTabs"), cfg = $("#tabCfgBtn");
+  tabCfg.order.forEach((k) => { const b = $(TAB_EL[k]); nav.insertBefore(b, cfg); b.querySelector(".tab-name").textContent = tabName(k); });
+}
+function saveTabs(cfg) {
+  tabCfg = normTabs(cfg); lsSet("memo-tabs-" + uid, tabCfg); applyTabs(); render();
+  if (!navigator.onLine) { toast("탭을 바꿨습니다. 인터넷이 연결되면 다른 기기에도 맞추도록 다시 저장해 주세요"); return; }
+  sb.auth.updateUser({ data: { memo_tabs: tabCfg } }).then(({ error }) => toast(error ? "이 기기에만 저장했습니다 (다른 기기 동기화 실패)" : "탭 순서·이름을 저장했습니다"))
+    .catch(() => toast("이 기기에만 저장했습니다 (다른 기기 동기화 실패)"));
+}
+const tabDlg = $("#tabDlg");
+let tabDraft = null;
+function openTabDlg() { tabDraft = { order: tabCfg.order.slice(), names: { ...tabCfg.names } }; renderTabDlg(); tabDlg.showModal(); }
+function renderTabDlg(focusKey) {
+  const n = tabDraft.order.length;
+  $("#tabCfgList").innerHTML = tabDraft.order.map((k, i) => `<li data-k="${k}">
+    <input type="text" maxlength="10" value="${esc(tabDraft.names[k] || DEFAULT_NAME[k])}" aria-label="${esc(DEFAULT_NAME[k])} 탭 이름" placeholder="${esc(DEFAULT_NAME[k])}">
+    <small>${VIEW_TAG[k] ? "#" + esc(VIEW_TAG[k]) : k === "ideas" ? "소재 보관함" : "태그 없는 메모"}</small>
+    <button type="button" class="btn tab-mv" data-mv="-1" ${i === 0 ? "disabled" : ""} aria-label="위로">▲</button>
+    <button type="button" class="btn tab-mv" data-mv="1" ${i === n - 1 ? "disabled" : ""} aria-label="아래로">▼</button></li>`).join("");
+  if (focusKey) { const b = $(`#tabCfgList li[data-k="${focusKey}"] .tab-mv:not([disabled])`); if (b) b.focus(); }
+}
+$("#tabCfgList").addEventListener("input", (e) => { const li = e.target.closest("li"); if (li) tabDraft.names[li.dataset.k] = e.target.value; });
+$("#tabCfgList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mv]"); if (!b) return;
+  const k = b.closest("li").dataset.k, i = tabDraft.order.indexOf(k), j = i + Number(b.dataset.mv);
+  if (j < 0 || j >= tabDraft.order.length) return;
+  tabDraft.order.splice(i, 1); tabDraft.order.splice(j, 0, k); renderTabDlg(k);
+});
+$("#tabReset").addEventListener("click", () => { tabDraft = { order: TAB_KEYS.slice(), names: {} }; renderTabDlg(); });
+$("#tabCancel").addEventListener("click", () => tabDlg.close());
+$("#tabSave").addEventListener("click", () => {
+  if (TAB_KEYS.some((k) => !String(tabDraft.names[k] || DEFAULT_NAME[k]).trim())) { toast("탭 이름을 비워 둘 수 없습니다"); return; }
+  tabDlg.close(); saveTabs(tabDraft);
 });
 
 /* ---------------- 맨 위로 버튼 ---------------- */
@@ -2147,7 +2201,7 @@ function renderSelBar() {
   const n = selIds.size; selBar.hidden = !n && !selMode;
   if (!n) selConfirm = false;
   if (selBar.hidden) return;
-  const what = VIEW_NAME[view] || "메모";
+  const what = viewName(view) || "메모";
   selBar.classList.toggle("confirm", selConfirm);
   selBar.innerHTML = selConfirm
     ? `<span class="sel-n"><b>${what} ${n}개</b>를 삭제할까요?</span><button type="button" class="sel-del" data-sel="yes">삭제</button><button type="button" data-sel="no">취소</button>`

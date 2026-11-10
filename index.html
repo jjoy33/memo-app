@@ -65,13 +65,15 @@
     <button type="button" class="btn" id="logoutBtn">로그아웃</button>
   </div>
 
-  <nav class="views" role="tablist" aria-label="화면 선택">
-    <button type="button" class="view-tab on" id="tabMemo" role="tab" aria-selected="true">메모</button>
-    <button type="button" class="view-tab" id="tabIdeas" role="tab" aria-selected="false">소재함 <span class="view-n" id="ideaCount"></span></button>
-    <button type="button" class="view-tab" id="tabKakao" role="tab" aria-selected="false">카톡정리 <span class="view-n" id="kakaoCount"></span></button>
-    <button type="button" class="view-tab" id="tabInsta" role="tab" aria-selected="false">인스타 <span class="view-n n-plain" id="instaCount"></span></button>
-    <button type="button" class="view-tab" id="tabPrompt" role="tab" aria-selected="false">프롬프트 <span class="view-n n-plain" id="promptCount"></span></button>
-    <button type="button" class="view-tab" id="tabMcp" role="tab" aria-selected="false">MCP·스킬 <span class="view-n n-plain" id="mcpCount"></span></button>
+  <nav class="views" id="viewTabs" role="tablist" aria-label="화면 선택">
+    <button type="button" class="view-tab on" id="tabMemo" role="tab" aria-selected="true"><span class="tab-name">메모</span></button>
+    <button type="button" class="view-tab" id="tabIdeas" role="tab" aria-selected="false"><span class="tab-name">소재함</span> <span class="view-n" id="ideaCount"></span></button>
+    <button type="button" class="view-tab" id="tabKakao" role="tab" aria-selected="false"><span class="tab-name">카톡정리</span> <span class="view-n" id="kakaoCount"></span></button>
+    <button type="button" class="view-tab" id="tabInsta" role="tab" aria-selected="false"><span class="tab-name">인스타</span> <span class="view-n n-plain" id="instaCount"></span></button>
+    <button type="button" class="view-tab" id="tabPrompt" role="tab" aria-selected="false"><span class="tab-name">프롬프트</span> <span class="view-n n-plain" id="promptCount"></span></button>
+    <button type="button" class="view-tab" id="tabMcp" role="tab" aria-selected="false"><span class="tab-name">MCP·스킬</span> <span class="view-n n-plain" id="mcpCount"></span></button>
+    <button type="button" class="view-tab" id="tabTips" role="tab" aria-selected="false"><span class="tab-name">강의꿀팁</span> <span class="view-n n-plain" id="tipsCount"></span></button>
+    <button type="button" class="view-tab tab-cfg-btn" id="tabCfgBtn" aria-label="탭 순서·이름 바꾸기" title="탭 순서·이름 바꾸기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></button>
   </nav>
 
   <form class="composer" id="composer" autocomplete="off">
@@ -165,10 +167,15 @@
   <div class="dlg-field"><span>다른 함으로</span><div class="move-list" id="moveBoxes"></div></div>
   <div class="dlg-field"><span>메모 목록으로</span>
     <button type="button" class="move-opt to-memo" id="moveToMemo">메모로 되돌리기 <small>소재함에서는 빠지고 새 메모가 됩니다</small></button></div>
-  <div class="dlg-field"><span>프롬프트·MCP·스킬 탭으로</span><div class="move-list" id="moveToTabs">
-    <button type="button" class="move-opt to-memo" data-tabto="프롬프트 탭">프롬프트 탭 <small>#프롬프트모음 메모가 됩니다</small></button>
-    <button type="button" class="move-opt to-memo" data-tabto="MCP·스킬 탭">MCP·스킬 탭 <small>#MCP스킬추천 메모가 됩니다</small></button></div></div>
+  <div class="dlg-field"><span>모아 보는 탭으로</span><div class="move-list" id="moveToTabs"></div></div>
   <div class="dlg-row"><button type="button" class="btn" id="moveCancel">닫기</button></div>
+</dialog>
+
+<dialog id="tabDlg" class="tab-dlg" aria-labelledby="tabDlgTitle">
+  <h2 id="tabDlgTitle">탭 순서·이름</h2>
+  <p class="tab-hint">▲▼로 순서를 바꾸고, 이름 칸을 눌러 고칩니다. 이름을 바꿔도 그 탭에 모이는 태그는 그대로입니다.</p>
+  <ol class="tab-cfg" id="tabCfgList"></ol>
+  <div class="dlg-row"><button type="button" class="btn" id="tabReset">처음 상태로</button><span class="sp"></span><button type="button" class="btn" id="tabCancel">취소</button><button type="button" class="btn primary" id="tabSave">저장</button></div>
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>
